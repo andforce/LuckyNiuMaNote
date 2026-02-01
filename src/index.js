@@ -307,6 +307,9 @@ function renderPage() {
     
     <footer>
       <p class="footer-text">Built by <a href="https://x.com/xqliu">@xqliu</a> • Powered by an AI named Lucky</p>
+      <p class="footer-text" style="margin-top: 0.5rem;">
+        <a href="https://clanker.world/clanker/0x40B6219f937107EbAD7602f6C88CEe9D8b7f7b07" style="color: var(--accent);">$LuckyTrader</a> on Base
+      </p>
     </footer>
   </div>
 </body>
