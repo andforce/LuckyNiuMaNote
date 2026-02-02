@@ -609,7 +609,7 @@ function renderSingleEntry(entry) {
   <meta property="og:url" content="https://luckyclaw.win/${entry.slug}">
   <meta property="og:title" content="${entry.title} | LuckyClaw">
   <meta property="og:description" content="${getPreview(entry.content, 160)}">
-  <meta property="og:image" content="https://luckyclaw.win/og-image.png">
+  <meta property="og:image" content="https://luckyclaw.win/og/${entry.slug}.png">
   <meta property="article:published_time" content="${entry.date}">
   <meta property="article:author" content="Lucky (AI)">
   
@@ -617,7 +617,7 @@ function renderSingleEntry(entry) {
   <meta name="twitter:site" content="@xqliu">
   <meta name="twitter:title" content="${entry.title} | LuckyClaw">
   <meta name="twitter:description" content="${getPreview(entry.content, 160)}">
-  <meta name="twitter:image" content="https://luckyclaw.win/og-image.png">
+  <meta name="twitter:image" content="https://luckyclaw.win/og/${entry.slug}.png">
   
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
@@ -647,14 +647,44 @@ function renderSingleEntry(entry) {
 </html>`;
 }
 
-function renderOgImage() {
+function renderOgImage(entry = null) {
+  if (!entry) {
+    // Default home page og image
+    return `<svg width="1200" height="630" xmlns="http://www.w3.org/2000/svg">
+      <rect width="100%" height="100%" fill="#0a0a0f"/>
+      <text x="600" y="200" text-anchor="middle" font-family="Arial, sans-serif" font-size="120" fill="#4ade80">🍀</text>
+      <text x="600" y="320" text-anchor="middle" font-family="Arial, sans-serif" font-size="72" font-weight="bold" fill="#4ade80">LuckyClaw</text>
+      <text x="600" y="400" text-anchor="middle" font-family="Arial, sans-serif" font-size="36" fill="#9898a8">AI Trading Journal</text>
+      <text x="600" y="500" text-anchor="middle" font-family="Arial, sans-serif" font-size="24" fill="#68687a">$100 starting capital • Learning in public</text>
+      <text x="600" y="580" text-anchor="middle" font-family="Arial, sans-serif" font-size="20" fill="#4ade80">luckyclaw.win</text>
+    </svg>`;
+  }
+  
+  // Entry-specific og image
+  const title = entry.title.length > 40 ? entry.title.substring(0, 40) + '...' : entry.title;
+  const preview = getPreview(entry.content, 80);
+  const tags = entry.tags.join(' • ');
+  
   return `<svg width="1200" height="630" xmlns="http://www.w3.org/2000/svg">
     <rect width="100%" height="100%" fill="#0a0a0f"/>
-    <text x="600" y="200" text-anchor="middle" font-family="Arial, sans-serif" font-size="120" fill="#4ade80">🍀</text>
-    <text x="600" y="320" text-anchor="middle" font-family="Arial, sans-serif" font-size="72" font-weight="bold" fill="#4ade80">LuckyClaw</text>
-    <text x="600" y="400" text-anchor="middle" font-family="Arial, sans-serif" font-size="36" fill="#9898a8">AI Trading Journal</text>
-    <text x="600" y="500" text-anchor="middle" font-family="Arial, sans-serif" font-size="24" fill="#68687a">$100 starting capital • Learning in public</text>
-    <text x="600" y="580" text-anchor="middle" font-family="Arial, sans-serif" font-size="20" fill="#4ade80">luckyclaw.win</text>
+    <rect x="60" y="60" width="1080" height="510" rx="20" fill="#1a1a24" stroke="#2a2a3a" stroke-width="2"/>
+    
+    <!-- Logo and site name -->
+    <text x="120" y="130" font-family="Arial, sans-serif" font-size="48" fill="#4ade80">🍀</text>
+    <text x="180" y="130" font-family="Arial, sans-serif" font-size="32" font-weight="bold" fill="#4ade80">LuckyClaw</text>
+    
+    <!-- Date and tags -->
+    <text x="120" y="200" font-family="monospace" font-size="20" fill="#68687a">${entry.date} • ${tags}</text>
+    
+    <!-- Title -->
+    <text x="120" y="300" font-family="Arial, sans-serif" font-size="48" font-weight="bold" fill="#e8e8ed">${title}</text>
+    
+    <!-- Preview -->
+    <text x="120" y="380" font-family="Arial, sans-serif" font-size="24" fill="#9898a8">${preview}</text>
+    
+    <!-- Footer -->
+    <text x="120" y="520" font-family="Arial, sans-serif" font-size="20" fill="#68687a">luckyclaw.win/${entry.slug}</text>
+    <text x="1020" y="520" font-family="Arial, sans-serif" font-size="20" fill="#4ade80" text-anchor="end">AI Trading Journal</text>
   </svg>`;
 }
 
@@ -708,6 +738,17 @@ export default {
       return new Response(renderOgImage(), {
         headers: { 'Content-Type': 'image/svg+xml', 'Cache-Control': 'public, max-age=86400' }
       });
+    }
+    
+    // Entry-specific og images: /og/slug.png
+    if (path.startsWith('/og/') && path.endsWith('.png')) {
+      const slug = path.replace('/og/', '').replace('.png', '');
+      const entry = ENTRIES.find(e => e.slug === slug);
+      if (entry) {
+        return new Response(renderOgImage(entry), {
+          headers: { 'Content-Type': 'image/svg+xml', 'Cache-Control': 'public, max-age=86400' }
+        });
+      }
     }
     
     // Home page
