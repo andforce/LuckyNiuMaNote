@@ -271,6 +271,67 @@ function renderPage() {
       margin-top: 0.25rem;
     }
     
+    /* Verify Section */
+    .verify-section {
+      background: var(--bg-secondary);
+      border-radius: 12px;
+      border: 1px solid var(--border);
+      padding: 1.5rem;
+      margin-bottom: 3rem;
+    }
+    
+    .verify-header {
+      font-size: 0.85rem;
+      font-weight: 600;
+      color: var(--text-primary);
+      margin-bottom: 1rem;
+      text-align: center;
+    }
+    
+    .verify-grid {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 1rem;
+    }
+    
+    .verify-item {
+      display: flex;
+      flex-direction: column;
+      gap: 0.25rem;
+    }
+    
+    .verify-label {
+      font-size: 0.7rem;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      color: var(--text-muted);
+    }
+    
+    .verify-link {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.8rem;
+      color: var(--accent);
+      text-decoration: none;
+      transition: opacity 0.2s;
+    }
+    
+    .verify-link:hover {
+      opacity: 0.8;
+      text-decoration: underline;
+    }
+    
+    .verify-note {
+      font-size: 0.75rem;
+      color: var(--text-muted);
+      text-align: center;
+      margin-top: 1rem;
+      font-style: italic;
+    }
+    
+    @media (max-width: 600px) {
+      .verify-grid { grid-template-columns: 1fr; }
+    }
+    
     /* Entries */
     .entries-header {
       font-size: 0.75rem;
@@ -430,6 +491,37 @@ function renderPage() {
         <div class="stat-value">+130%</div>
         <div class="stat-label">Total Return</div>
       </div>
+    </div>
+    
+    <div class="verify-section">
+      <p class="verify-header">🔍 Verify On-Chain</p>
+      <div class="verify-grid">
+        <div class="verify-item">
+          <span class="verify-label">$LuckyTrader Token</span>
+          <a href="https://basescan.org/token/0x40B6219f937107EbAD7602f6C88CEe9D8b7f7b07" target="_blank" class="verify-link">
+            0x40B6...7b07 ↗
+          </a>
+        </div>
+        <div class="verify-item">
+          <span class="verify-label">Token Creator Wallet</span>
+          <a href="https://basescan.org/address/0xF09f12896e688aB1cF54Bc31482AAbFd79d54F0a" target="_blank" class="verify-link">
+            0xF09f...4F0a ↗
+          </a>
+        </div>
+        <div class="verify-item">
+          <span class="verify-label">Trading Account (Hyperliquid)</span>
+          <a href="https://app.hyperliquid.xyz/explorer/address/0xa24e75a6f48c99ec9abda7b9dba5c7c9663f918b" target="_blank" class="verify-link">
+            0xa24e...918b ↗
+          </a>
+        </div>
+        <div class="verify-item">
+          <span class="verify-label">LP Pool (Uniswap V4)</span>
+          <a href="https://www.geckoterminal.com/base/pools/0xa61edcb7b3f35bcc4678593e0b0fe2861baa06553fe2228a0fa543d1f976d69e" target="_blank" class="verify-link">
+            GeckoTerminal ↗
+          </a>
+        </div>
+      </div>
+      <p class="verify-note">All transactions and earnings are publicly verifiable on-chain.</p>
     </div>
     
     <p class="entries-header">Journal Entries</p>
