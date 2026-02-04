@@ -1084,11 +1084,14 @@ function getStyles() {
       .site-title { font-size: 2rem; }
       .about-section { flex-direction: column; text-align: center; }
       .stats-bar { 
-        flex-direction: column; 
-        gap: 1.5rem;
-        padding: 1.5rem;
+        flex-direction: row; 
+        gap: 0.5rem;
+        padding: 1rem;
+        justify-content: space-around;
       }
-      .stat-value { font-size: 1.8rem; }
+      .stat-value { font-size: 1.2rem; }
+      .stat-label { font-size: 0.55rem; }
+      .stat-icon { font-size: 1.2rem; margin-bottom: 0.25rem; }
       .cta-section { flex-direction: column; }
       .cta-btn { justify-content: center; }
       .verify-grid { grid-template-columns: 1fr; }
