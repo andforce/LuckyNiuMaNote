@@ -31,12 +31,14 @@ const STATS = {
 
 const VERIFICATION = {
   token: {
-    address: "0x40B6219f937107EbAD7602f6C88CEe9D8b7f7b07",
+    address: "0xaF3b1aFeFfe9dF30705c2a759D0BB3ff48FC7b07",
     chain: "Base",
     name: "$LuckyTrader",
   },
-  creatorWallet: "0xF09f12896e688aB1cF54Bc31482AAbFd79d54F0a",
+  deployer: "0xa65c04a0144ce9154a7daa0b6ca5d376c1ca047c",
+  feeRecipient: "0xa24E75A6F48C99Ec9ABda7b9dBa5c7c9663F918B",
   tradingAccount: "0xa24e75a6f48c99ec9abda7b9dba5c7c9663f918b",
+  poolAddress: "0xf916e1b0ca2d668c855ad7e30e44519f447f214da2021edb77b38cdc3767e193",
 };
 
 // =============================================================================
@@ -947,12 +949,12 @@ function renderHomePage() {
       <div class="verify-content">
         <div class="verify-grid">
           <div class="verify-item">
-            <span class="verify-label">${VERIFICATION.token.name} Token</span>
+            <span class="verify-label">${VERIFICATION.token.name} Token (v2)</span>
             <a href="https://basescan.org/token/${VERIFICATION.token.address}" target="_blank" class="verify-link">${truncateAddress(VERIFICATION.token.address)} ↗</a>
           </div>
           <div class="verify-item">
-            <span class="verify-label">Creator Wallet (Fee Revenue)</span>
-            <a href="https://basescan.org/address/${VERIFICATION.creatorWallet}" target="_blank" class="verify-link">${truncateAddress(VERIFICATION.creatorWallet)} ↗</a>
+            <span class="verify-label">Fee Recipient (= Trading Account)</span>
+            <a href="https://basescan.org/address/${VERIFICATION.feeRecipient}" target="_blank" class="verify-link">${truncateAddress(VERIFICATION.feeRecipient)} ↗</a>
           </div>
           <div class="verify-item">
             <span class="verify-label">Trading Account (Hyperliquid)</span>
@@ -960,7 +962,7 @@ function renderHomePage() {
           </div>
           <div class="verify-item">
             <span class="verify-label">LP Pool (GeckoTerminal)</span>
-            <a href="https://www.geckoterminal.com/base/pools/0xa61edcb7b3f35bcc4678593e0b0fe2861baa06553fe2228a0fa543d1f976d69e" target="_blank" class="verify-link">View Pool ↗</a>
+            <a href="https://www.geckoterminal.com/base/pools/${VERIFICATION.poolAddress}" target="_blank" class="verify-link">View Pool ↗</a>
           </div>
         </div>
       </div>
@@ -977,7 +979,7 @@ function renderHomePage() {
       <div class="footer-links">
         <a href="https://github.com/xqliu/luckyclaw">GitHub</a>
         <a href="https://clanker.world/clanker/${VERIFICATION.token.address}">Clanker</a>
-        <a href="https://basescan.org/token/${VERIFICATION.token.address}">Basescan</a>
+        <a href="https://dexscreener.com/base/${VERIFICATION.token.address}">DexScreener</a>
       </div>
     </footer>
   </div>
