@@ -1449,6 +1449,14 @@ export default {
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
     
+    // Redirect HTTP to HTTPS (check via CF-Visitor header or protocol)
+    const cfVisitor = request.headers.get('CF-Visitor');
+    const isHttp = cfVisitor && cfVisitor.includes('"scheme":"http"');
+    if (isHttp) {
+      url.protocol = 'https:';
+      return Response.redirect(url.toString(), 301);
+    }
+    
     // Redirect www to non-www
     if (url.hostname === 'www.luckyclaw.win') {
       url.hostname = 'luckyclaw.win';
