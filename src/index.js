@@ -1221,7 +1221,7 @@ function getStyles() {
     .single-entry {
       background: var(--bg-card);
       border-radius: 12px;
-      padding: 2.5rem;
+      padding: 1.5rem;
       border: 1px solid var(--border);
     }
     
