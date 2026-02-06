@@ -1555,6 +1555,7 @@ function renderHomePage() {
         <a href="https://github.com/xqliu/luckyclaw">GitHub</a>
         <a href="https://clanker.world/clanker/${VERIFICATION.token.address}">Clanker</a>
         <a href="https://dexscreener.com/base/${VERIFICATION.token.address}">DexScreener</a>
+        <a href="https://www.geckoterminal.com/base/pools/${VERIFICATION.poolAddress}">GeckoTerminal</a>
       </div>
     </footer>
   </div>
@@ -1611,6 +1612,7 @@ function renderSingleEntry(entry) {
         <a href="/">All Entries</a>
         <a href="https://x.com/xqliu">Twitter</a>
         <a href="https://github.com/xqliu/luckyclaw">GitHub</a>
+        <a href="https://www.geckoterminal.com/base/pools/${VERIFICATION.poolAddress}">GeckoTerminal</a>
       </div>
     </footer>
   </div>
