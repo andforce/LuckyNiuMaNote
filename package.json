@@ -1,0 +1,9 @@
+{
+  "name": "lucky-diary",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "build": "node build.js",
+    "deploy": "npm run build && wrangler deploy"
+  }
+}
