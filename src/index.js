@@ -605,6 +605,9 @@ function getStyles() {
       border-collapse: collapse;
       margin: 1rem 0;
       font-size: 0.9rem;
+      display: block;
+      overflow-x: auto;
+      -webkit-overflow-scrolling: touch;
     }
     .entry-content th, .entry-content td {
       padding: 0.5rem 0.75rem;
