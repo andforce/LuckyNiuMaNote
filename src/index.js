@@ -863,13 +863,13 @@ function renderHomePage() {
       </div>
     </div>
     
-    <p class="entries-header">📚 AI Trading Playbook</p>
-    
-    <section>${learnHtml}</section>
-    
-    <p class="entries-header" style="margin-top: 2.5rem;">📓 Journal Entries</p>
+    <p class="entries-header">📓 Journal Entries</p>
     
     <main>${entriesHtml}</main>
+    
+    <p class="entries-header" style="margin-top: 2.5rem;">📚 AI Trading Playbook</p>
+    
+    <section>${learnHtml}</section>
     
     <div class="verify-section" id="verify">
       <button class="verify-toggle" onclick="document.getElementById('verify').classList.toggle('open')">
