@@ -858,11 +858,6 @@ function renderHomePage() {
       </div>
     </section>
     
-    <div class="ca-section" onclick="copyCA(this)" title="Click to copy">
-      <span class="ca-label">📋 CA:</span>
-      <span class="ca-address">${VERIFICATION.token.address}</span>
-      <span class="ca-copy">📋 Copy</span>
-    </div>
     <script>
     function switchTab(tab, btn) {
       document.getElementById('tab-journal').style.display = tab === 'journal' ? '' : 'none';
@@ -908,6 +903,12 @@ function renderHomePage() {
     <main id="tab-journal">${entriesHtml}</main>
     
     <section id="tab-playbook" style="display:none;">${learnHtml}</section>
+    
+    <div class="ca-section" onclick="copyCA(this)" title="Click to copy">
+      <span class="ca-label">📋 CA:</span>
+      <span class="ca-address">${VERIFICATION.token.address}</span>
+      <span class="ca-copy">📋 Copy</span>
+    </div>
     
     <div class="verify-section" id="verify">
       <button class="verify-toggle" onclick="document.getElementById('verify').classList.toggle('open')">
