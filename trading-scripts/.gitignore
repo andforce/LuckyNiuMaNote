@@ -1,0 +1,16 @@
+# Secrets - NEVER commit real config!
+config/.hl_config
+
+# Python
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/

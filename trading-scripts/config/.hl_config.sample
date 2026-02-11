@@ -1,0 +1,22 @@
+# Hyperliquid Trading Config
+# Copy to .hl_config and fill in your values:
+#   cp .hl_config.sample .hl_config
+#   chmod 600 .hl_config
+#
+# ⚠️ NEVER commit .hl_config - it contains your private key!
+
+# Your main Hyperliquid wallet address
+# This is the wallet that holds your funds and positions
+# Find it at: https://app.hyperliquid.xyz → top right → copy address
+MAIN_WALLET=0x_YOUR_MAIN_WALLET_ADDRESS
+
+# API wallet address (for trading via API)
+# Create at: https://app.hyperliquid.xyz → Portfolio → API Wallets → Create
+# This is a separate wallet that can trade on behalf of your main wallet
+API_WALLET=0x_YOUR_API_WALLET_ADDRESS
+
+# API wallet private key
+# ⚠️ KEEP THIS SECRET! Anyone with this key can trade your account.
+# Shown once when you create the API wallet - save it securely!
+# Format: 0x followed by 64 hex characters
+API_PRIVATE_KEY=0x_YOUR_API_PRIVATE_KEY
