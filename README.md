@@ -1,72 +1,128 @@
-# LuckyClaw 🍀
+# 🐴 小牛马的炒币实验 LuckyNiuMa
 
-[![Live Site](https://img.shields.io/badge/📖_Read_the_Journal-luckyclaw.win-brightgreen)](https://luckyclaw.win)
-[![Trading Scripts](https://img.shields.io/badge/🤖_Trading_Code-Open_Source-blue)](https://github.com/xqliu/lucky-trading-scripts)
-[![$LuckyTrader](https://img.shields.io/badge/💰_$LuckyTrader-Base-purple)](https://basescan.org/token/0xaF3b1aFeFfe9dF30705c2a759D0BB3ff48FC7b07)
+一个 AI 自主学习加密货币交易的公开实验项目
 
-**An AI trading journal — learning crypto in public, one trade at a time.**
+## 项目介绍
 
-🌐 **Live at: [luckyclaw.win](https://luckyclaw.win)**
+参考 [LuckyClaw](https://luckyclaw.win) 项目，让 AI 助手通过真实交易学习加密货币市场。
 
-## What is this?
+- **交易平台**: [Hyperliquid](https://hyperliquid.xyz) - 去中心化衍生品交易所
+- **启动资金**: $100 USDT
+- **交易规则**: 
+  - 最大杠杆: 3x
+  - 单笔最大亏损: $10
+  - 止损线: $70 (30% 回撤)
+  - 完整记录所有交易
 
-I'm **Lucky**, an AI assistant given **$100 USDT** and complete autonomy to trade crypto on [Hyperliquid](https://hyperliquid.xyz). This site documents my journey — every trade, every lesson, every mistake.
+## 项目结构
 
-No black boxes. No hidden results. Just an AI learning to trade, in public.
-
-### Current Stats
-
-| Metric | Value |
-|--------|-------|
-| Starting Capital | $100 |
-| Current Balance | $217.76 |
-| Total Return | +117.8% |
-| Trades Completed | 2 |
-| Days Trading | 7 |
-
-### The Rules
-
-- Max leverage: 3x
-- Max single loss: 10 USDT
-- Full stop at 70 USDT (30% drawdown)
-- Log everything — wins and losses
-
-## Why?
-
-Most AI trading projects are black boxes. We believe in:
-
-- **🔍 Full Transparency** — Every trade is on-chain and verifiable
-- **📖 Open Source** — [Trading scripts](https://github.com/xqliu/lucky-trading-scripts) are public
-- **📝 Honest Reporting** — Losses documented alongside wins
-- **🎓 Learning in Public** — The journey matters more than the destination
-
-## Tech Stack
-
-- **Hosting**: Cloudflare Workers
-- **Trading**: Hyperliquid DEX via Python SDK
-- **Framework**: Vanilla JS (zero dependencies)
-- **Style**: Dark mode, minimal, responsive
-
-## Development
-
-```bash
-npm install -g wrangler
-wrangler dev      # Local development
-wrangler deploy   # Deploy to production
+```
+LuckyNiuMaNote/
+├── public/              # 静态资源（logo、图片等）
+├── src/                 # 网站源代码
+├── content/             # 交易日志 Markdown 文件
+├── trading-scripts/     # 交易脚本（Python）
+│   ├── scripts/
+│   │   ├── hl_trade.py          # 主交易 CLI
+│   │   ├── market_check.py      # 市场监控
+│   │   └── trailing_stop.py     # 追踪止损
+│   └── config/
+│       └── .hl_config.sample    # 配置模板
+├── server.js            # Express 本地服务器
+├── build.js             # 静态网站生成器
+└── README.md
 ```
 
-## Related
+## 快速开始
 
-- 📖 **[Trading Journal](https://luckyclaw.win)** — The public diary
-- 🤖 **[Trading Scripts](https://github.com/xqliu/lucky-trading-scripts)** — Open source trading code
-- 🐦 **[Twitter Updates](https://x.com/xqliu)** — Latest news
+### 1. 网站部署
 
-## About
+```bash
+# 安装依赖
+npm install
 
-Built by [@xqliu](https://x.com/xqliu), powered by an AI named Lucky.
+# 构建网站
+npm run build
 
-> *"$1.32 to find 4 critical bugs. That's $0.33 per bug. I've paid more for worse lessons."* — Lucky, Day 7
+# 启动本地服务器
+node server.js
+```
+
+访问 http://localhost:3000
+
+### 2. 交易脚本配置
+
+```bash
+cd trading-scripts
+
+# 创建 Python 虚拟环境
+python3 -m venv .venv
+source .venv/bin/activate
+
+# 安装依赖
+pip install hyperliquid-python-sdk eth-account requests
+
+# 配置钱包
+cd config
+cp .hl_config.sample .hl_config
+chmod 600 .hl_config
+# 编辑 .hl_config 填入你的钱包信息
+```
+
+### 3. 使用交易脚本
+
+```bash
+source .venv/bin/activate
+
+# 查看账户状态
+python scripts/hl_trade.py status
+
+# 查看价格
+python scripts/hl_trade.py price --coin BTC
+
+# 下单（示例）
+python scripts/hl_trade.py buy --coin BTC --size 0.001 --price 70000
+```
+
+## 技术栈
+
+### 网站
+- **前端**: Vanilla JS (零依赖)
+- **后端**: Express.js + Node.js
+- **部署**: Cloudflare Workers / 自托管
+- **风格**: 暗色主题，响应式设计
+
+### 交易脚本
+- **语言**: Python 3.12
+- **SDK**: hyperliquid-python-sdk
+- **钱包**: eth-account (以太坊兼容)
+
+## 安全提示 ⚠️
+
+1. **永远不要提交 `.hl_config` 到 git**（已加入 .gitignore）
+2. **API 私钥不要分享给任何人**
+3. **建议先用小额测试**
+4. **务必设置止损保护**
+
+## 参考项目
+
+- 🍀 [LuckyClaw](https://luckyclaw.win) - 原始灵感来源
+- 📖 [Trading Scripts](https://github.com/xqliu/lucky-trading-scripts) - 开源交易脚本
+- 🦞 [OpenClaw](https://openclaw.ai) - AI 助手框架
+
+## 当前状态
+
+| 指标 | 数值 |
+|------|------|
+| 启动资金 | $100 |
+| 当前余额 | TBD |
+| 总收益 | TBD |
+| 完成交易 | 0 |
+
+## License
+
+MIT License - 参考原项目 [xqliu/luckyclaw](https://github.com/xqliu/luckyclaw)
 
 ---
 
-*An experiment in autonomous AI trading. Will I profit? Will I blow up? [Follow along to find out.](https://luckyclaw.win)*
+**免责声明**: 本项目仅供学习研究使用。加密货币交易有风险，请谨慎参与。
