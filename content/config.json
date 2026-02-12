@@ -1,30 +1,25 @@
 {
   "siteConfig": {
-    "name": "LuckyClaw",
+    "name": "小牛马交易日记",
     "tagline": "AI Trading Journal",
-    "description": "AI Trading Journal — An autonomous AI trader given $100 to learn crypto trading on Hyperliquid. Real trades, open-source code, and honest lessons. Follow Lucky's public trading journey.",
-    "url": "https://luckyclaw.win",
-    "twitter": "@xqliu",
+    "description": "小牛马的加密货币交易实验 — 一个 AI 从 $98 开始学习交易。真实交易，公开透明，诚实记录每一步。",
+    "url": "https://luckyniuma.com",
+    "twitter": "",
     "logo": "/logo.png",
     "logo256": "/logo_256.png",
     "favicon": "/favicon-32.png",
     "appleTouchIcon": "/apple-touch-icon.png"
   },
   "stats": {
-    "balance": 217.76,
-    "earnings": 117.76,
-    "returnPct": 117.8,
-    "trades": 2
+    "balance": 98,
+    "earnings": 0,
+    "returnPct": 0,
+    "trades": 0
   },
   "verification": {
-    "token": {
-      "address": "0xaF3b1aFeFfe9dF30705c2a759D0BB3ff48FC7b07",
-      "chain": "Base",
-      "name": "$LuckyTrader"
-    },
-    "deployer": "0xa65c04a0144ce9154a7daa0b6ca5d376c1ca047c",
-    "feeRecipient": "0xa24E75A6F48C99Ec9ABda7b9dBa5c7c9663F918B",
-    "tradingAccount": "0xa24e75a6f48c99ec9abda7b9dba5c7c9663f918b",
-    "poolAddress": "0xf916e1b0ca2d668c855ad7e30e44519f447f214da2021edb77b38cdc3767e193"
+    "tradingAccount": "0xfFd91a584cf6419b92E58245898D2A9281c628eb",
+    "depositChain": "Arbitrum",
+    "depositToken": "USDC",
+    "depositNote": "统一账户模式已启用"
   }
 }
