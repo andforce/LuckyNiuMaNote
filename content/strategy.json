@@ -52,9 +52,9 @@
     "trailingStop": "3% 移动止损（盈利后触发）"
   },
   "positionSizing": {
-    "maxLeverage": 20,
-    "defaultLeverage": 10,
-    "maxPositionUsd": 500,
+    "maxLeverage": 3,
+    "defaultLeverage": 2,
+    "maxPositionUsd": 294,
     "sizingMethod": "基于信心度的动态仓位"
   },
   "riskManagement": {
@@ -66,6 +66,10 @@
   "performance": {
     "initialCapital": 98,
     "targetReturn": "10x",
-    "maxAcceptableLoss": "100%（可归零）"
+    "maxAcceptableLoss": "100%（可归零）",
+    "notes": [
+      "最大杠杆限制为 3x，降低爆仓风险",
+      "以 $98 本金计算，最大仓位约 $294"
+    ]
   }
 }
