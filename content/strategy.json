@@ -1,0 +1,71 @@
+{
+  "strategy": {
+    "name": "趋势跟踪突破策略",
+    "version": "1.0",
+    "description": "基于多时间框架均线系统的趋势跟踪策略，结合波动率突破和动态杠杆管理",
+    "createdAt": "2026-02-22",
+    "updatedAt": "2026-02-22",
+    "status": "active"
+  },
+  "markets": {
+    "primary": ["BTC", "ETH"],
+    "timeframe": "1h",
+    "exchange": "Hyperliquid"
+  },
+  "indicators": [
+    {
+      "name": "EMA 快线",
+      "period": 9,
+      "description": "快速响应价格变化"
+    },
+    {
+      "name": "EMA 中线", 
+      "period": 21,
+      "description": "主要趋势判断"
+    },
+    {
+      "name": "EMA 慢线",
+      "period": 55,
+      "description": "长期趋势确认"
+    },
+    {
+      "name": "ATR",
+      "period": 14,
+      "description": "真实波幅，用于止损止盈计算"
+    }
+  ],
+  "entryRules": {
+    "long": [
+      "EMA 9 > EMA 21 > EMA 55（多头排列）",
+      "金叉信号：EMA 9 上穿 EMA 21",
+      "当前价格 > EMA 21"
+    ],
+    "short": [
+      "EMA 9 < EMA 21 < EMA 55（空头排列）",
+      "死叉信号：EMA 9 下穿 EMA 21",
+      "当前价格 < EMA 21"
+    ]
+  },
+  "exitRules": {
+    "stopLoss": "2 倍 ATR",
+    "takeProfit": "3 倍 ATR（1.5:1 风险收益比）",
+    "trailingStop": "3% 移动止损（盈利后触发）"
+  },
+  "positionSizing": {
+    "maxLeverage": 20,
+    "defaultLeverage": 10,
+    "maxPositionUsd": 500,
+    "sizingMethod": "基于信心度的动态仓位"
+  },
+  "riskManagement": {
+    "maxDailyDrawdown": "20%",
+    "stopLossPerTrade": "5%",
+    "cooldownAfterLoss": "60 分钟",
+    "maxConcurrentPositions": 2
+  },
+  "performance": {
+    "initialCapital": 98,
+    "targetReturn": "10x",
+    "maxAcceptableLoss": "100%（可归零）"
+  }
+}

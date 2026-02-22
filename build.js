@@ -65,6 +65,14 @@ function readEntries(dir) {
 // Read config
 const config = JSON.parse(fs.readFileSync(path.join(__dirname, 'content', 'config.json'), 'utf-8'));
 
+// Read strategy
+let strategy = {};
+try {
+  strategy = JSON.parse(fs.readFileSync(path.join(__dirname, 'content', 'strategy.json'), 'utf-8'));
+} catch (e) {
+  console.log('No strategy.json found, skipping...');
+}
+
 // Read entries
 const entries = readEntries(path.join(__dirname, 'content', 'entries'));
 const learnEntries = readEntries(path.join(__dirname, 'content', 'learn'));
@@ -80,6 +88,8 @@ export const STATS = ${JSON.stringify(config.stats, null, 2)};
 
 export const VERIFICATION = ${JSON.stringify(config.verification, null, 2)};
 
+export const STRATEGY = ${JSON.stringify(strategy, null, 2)};
+
 export const ENTRIES = ${JSON.stringify(entries, null, 2)};
 
 export const LEARN_ENTRIES = ${JSON.stringify(learnEntries, null, 2)};
@@ -90,3 +100,6 @@ fs.writeFileSync(outPath, output, 'utf-8');
 
 console.log(`✅ Generated ${outPath}`);
 console.log(`   ${entries.length} entries, ${learnEntries.length} learn entries`);
+if (Object.keys(strategy).length > 0) {
+  console.log(`   Strategy: ${strategy.strategy?.name || 'loaded'}`);
+}

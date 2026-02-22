@@ -57,6 +57,8 @@ const SITE_CONFIG = extractData(dataContent, 'SITE_CONFIG');
 const STATS = extractData(dataContent, 'STATS');
 const ENTRIES = extractData(dataContent, 'ENTRIES');
 const VERIFICATION = extractData(dataContent, 'VERIFICATION');
+const STRATEGY = extractData(dataContent, 'STRATEGY');
+const LEARN_ENTRIES = extractData(dataContent, 'LEARN_ENTRIES');
 
 // 静态文件服务
 app.use('/public', express.static(path.join(__dirname, 'public')));
@@ -962,6 +964,11 @@ app.get('/', (req, res) => {
       <img src="/logo_256.png" alt="小牛马" class="logo">
       <h1>🐴 小牛马的交易日记</h1>
       <p class="subtitle">// AI Trading Experiment v1.0</p>
+      <div style="margin-top: 20px; display: flex; justify-content: center; gap: 15px; flex-wrap: wrap;">
+        <a href="/" style="background: var(--bg-card); padding: 8px 16px; border-radius: 4px; border: 1px solid var(--border); font-size: 0.9em;">🏠 首页</a>
+        <a href="/strategy" style="background: var(--bg-card); padding: 8px 16px; border-radius: 4px; border: 1px solid var(--accent); font-size: 0.9em;">🎯 交易策略</a>
+        <a href="/learn" style="background: var(--bg-card); padding: 8px 16px; border-radius: 4px; border: 1px solid var(--border); font-size: 0.9em;">📚 学习资料</a>
+      </div>
     </header>
     
     <div class="stats" id="stats-container">
@@ -1105,9 +1112,11 @@ app.get('/entry/:slug', (req, res) => {
         📅 ${formatDate(entry.date)} 
         ${entry.tags.map(t => `<span class="tag">#${t}</span>`).join('')}
       </p>
+      <div style="margin-top: 15px; display: flex; justify-content: center; gap: 15px;">
+        <a href="/" style="font-size: 0.85em;">← 返回首页</a>
+        <a href="/strategy" style="font-size: 0.85em;">🎯 交易策略</a>
+      </div>
     </header>
-    
-    <a href="/" class="back-link">← 返回首页</a>
     
     <div class="entry" style="margin-top: 20px;">
       <div class="entry-content">
@@ -1116,6 +1125,192 @@ app.get('/entry/:slug', (req, res) => {
     </div>
     
     <a href="/" class="back-link">← 返回首页</a>
+  `;
+  
+  res.send(getHTML(content));
+});
+
+// 策略页面
+app.get('/strategy', (req, res) => {
+  const strat = STRATEGY?.strategy || {};
+  const indicators = STRATEGY?.indicators || [];
+  const entryRules = STRATEGY?.entryRules || {};
+  const exitRules = STRATEGY?.exitRules || {};
+  const risk = STRATEGY?.riskManagement || {};
+  
+  const indicatorsHTML = indicators.map(ind => `
+    <div class="position-item" style="margin-bottom: 10px;">
+      <div class="position-row">
+        <span class="coin" style="font-size: 1.1em;">${ind.name}</span>
+        <span class="tag">周期: ${ind.period}</span>
+      </div>
+      <div style="color: var(--text-secondary); margin-top: 8px; font-size: 0.9em;">
+        ${ind.description}
+      </div>
+    </div>
+  `).join('');
+  
+  const longRules = (entryRules.long || []).map(rule => `<li style="margin: 8px 0;">${rule}</li>`).join('');
+  const shortRules = (entryRules.short || []).map(rule => `<li style="margin: 8px 0;">${rule}</li>`).join('');
+  
+  const content = `
+    <header>
+      <h1>🎯 交易策略</h1>
+      <p class="subtitle">${strat.name || '趋势跟踪策略'} <span class="tag">v${strat.version || '1.0'}</span></p>
+      <div style="margin-top: 15px; display: flex; justify-content: center; gap: 15px;">
+        <a href="/" style="font-size: 0.85em;">← 返回首页</a>
+        <a href="/learn" style="font-size: 0.85em;">📚 学习资料</a>
+      </div>
+    </header>
+    
+    <div class="wallet-card" style="margin-top: 30px;">
+      <h3>📋 策略概述</h3>
+      <p style="color: var(--text-secondary); line-height: 1.8;">${strat.description || '基于多时间框架均线系统的趋势跟踪策略'}</p>
+      <div style="margin-top: 15px; display: flex; gap: 20px; flex-wrap: wrap;">
+        <span class="tag">状态: ${strat.status === 'active' ? '✅ 运行中' : '⏸️ 暂停'}</span>
+        <span class="tag">市场: ${(STRATEGY.markets?.primary || []).join(', ')}</span>
+        <span class="tag">周期: ${STRATEGY.markets?.timeframe || '1h'}</span>
+      </div>
+    </div>
+    
+    <div class="position-card">
+      <div class="position-header">
+        <h3>📊 技术指标</h3>
+      </div>
+      ${indicatorsHTML || '<p style="color: var(--text-muted);">暂无指标配置</p>'}
+    </div>
+    
+    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 20px; margin: 30px 0;">
+      <div class="wallet-card" style="border-color: var(--accent);">
+        <h3 style="color: var(--accent);">📈 做多条件</h3>
+        <ul style="color: var(--text-secondary); padding-left: 20px;">
+          ${longRules || '<li>暂无配置</li>'}
+        </ul>
+      </div>
+      
+      <div class="wallet-card" style="border-color: var(--cyber-pink);">
+        <h3 style="color: var(--cyber-pink);">📉 做空条件</h3>
+        <ul style="color: var(--text-secondary); padding-left: 20px;">
+          ${shortRules || '<li>暂无配置</li>'}
+        </ul>
+      </div>
+    </div>
+    
+    <div class="wallet-card">
+      <h3>🚪 出场规则</h3>
+      <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px; margin-top: 15px;">
+        <div class="stat-card" style="padding: 15px;">
+          <div class="stat-label">止损</div>
+          <div class="stat-value" style="font-size: 1.5em; color: var(--cyber-pink);">${exitRules.stopLoss || '-'}</div>
+        </div>
+        <div class="stat-card" style="padding: 15px;">
+          <div class="stat-label">止盈</div>
+          <div class="stat-value" style="font-size: 1.5em; color: var(--accent);">${exitRules.takeProfit || '-'}</div>
+        </div>
+        <div class="stat-card" style="padding: 15px;">
+          <div class="stat-label">移动止损</div>
+          <div class="stat-value" style="font-size: 1.5em; color: var(--cyber-blue);">${exitRules.trailingStop || '-'}</div>
+        </div>
+      </div>
+    </div>
+    
+    <div class="position-card">
+      <div class="position-header">
+        <h3>🛡️ 风险管理</h3>
+      </div>
+      <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px;">
+        <div class="stat-card" style="padding: 15px;">
+          <div class="stat-label">日最大回撤</div>
+          <div class="stat-value pink" style="font-size: 1.5em;">${risk.maxDailyDrawdown || '-'}</div>
+        </div>
+        <div class="stat-card" style="padding: 15px;">
+          <div class="stat-label">单笔止损</div>
+          <div class="stat-value pink" style="font-size: 1.5em;">${risk.stopLossPerTrade || '-'}</div>
+        </div>
+        <div class="stat-card" style="padding: 15px;">
+          <div class="stat-label">最大杠杆</div>
+          <div class="stat-value blue" style="font-size: 1.5em;">${STRATEGY.positionSizing?.maxLeverage || '-'}x</div>
+        </div>
+        <div class="stat-card" style="padding: 15px;">
+          <div class="stat-label">冷静期</div>
+          <div class="stat-value" style="font-size: 1.5em;">${risk.cooldownAfterLoss || '-'}</div>
+        </div>
+      </div>
+    </div>
+    
+    <a href="/" class="back-link">← 返回首页</a>
+  `;
+  
+  res.send(getHTML(content));
+});
+
+// 学习资料页面
+app.get('/learn', (req, res) => {
+  const learnHTML = LEARN_ENTRIES.map(entry => {
+    const preview = entry.content.substring(0, 150).replace(/\*/g, '').replace(/\n/g, ' ');
+    return `
+    <div class="entry">
+      <h2><a href="/learn/${entry.slug}">${entry.title}</a></h2>
+      <div class="entry-meta">
+        📅 ${formatDate(entry.date)}
+        ${entry.tags.map(t => `<span class="tag">#${t}</span>`).join('')}
+      </div>
+      <div class="entry-content">
+        <p>${preview}...</p>
+      </div>
+      <a href="/learn/${entry.slug}" class="read-link">阅读全文 →</a>
+    </div>
+  `}).join('') || '<p style="color: var(--text-muted); text-align: center; padding: 40px;">暂无学习资料</p>';
+  
+  const content = `
+    <header>
+      <h1>📚 学习资料</h1>
+      <p class="subtitle">交易策略、市场分析与风险管理</p>
+      <div style="margin-top: 15px; display: flex; justify-content: center; gap: 15px;">
+        <a href="/" style="font-size: 0.85em;">← 返回首页</a>
+        <a href="/strategy" style="font-size: 0.85em;">🎯 交易策略</a>
+      </div>
+    </header>
+    
+    <div class="entries">
+      ${learnHTML}
+    </div>
+    
+    <a href="/" class="back-link">← 返回首页</a>
+  `;
+  
+  res.send(getHTML(content));
+});
+
+// 学习资料单篇文章
+app.get('/learn/:slug', (req, res) => {
+  const entry = LEARN_ENTRIES.find(e => e.slug === req.params.slug);
+  
+  if (!entry) {
+    return res.status(404).send(getHTML('<header><h1>404 - 文章未找到</h1><p><a href="/">← 返回首页></p></header>'));
+  }
+  
+  const content = `
+    <header>
+      <h1>${entry.title}</h1>
+      <p class="subtitle">
+        📅 ${formatDate(entry.date)} 
+        ${entry.tags.map(t => `<span class="tag">#${t}</span>`).join('')}
+      </p>
+      <div style="margin-top: 15px; display: flex; justify-content: center; gap: 15px;">
+        <a href="/" style="font-size: 0.85em;">← 返回首页</a>
+        <a href="/learn" style="font-size: 0.85em;">📚 学习资料</a>
+        <a href="/strategy" style="font-size: 0.85em;">🎯 交易策略</a>
+      </div>
+    </header>
+    
+    <div class="entry" style="margin-top: 20px;">
+      <div class="entry-content">
+        ${renderMarkdown(entry.content)}
+      </div>
+    </div>
+    
+    <a href="/learn" class="back-link">← 返回学习资料</a>
   `;
   
   res.send(getHTML(content));
