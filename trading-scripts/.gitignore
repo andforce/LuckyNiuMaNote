@@ -1,5 +1,6 @@
 # Secrets - NEVER commit real config!
 config/.hl_config
+.hl_config
 
 # Python
 .venv/
