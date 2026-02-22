@@ -2,3 +2,7 @@ node_modules/
 .wrangler/
 .dev.vars
 src/generated-data.js
+logs/
+*.log
+.trading-scripts/.hl_config
+
