@@ -37,6 +37,10 @@ CONFIG = {
     'take_profit_atr_mult': 3,
     'check_interval': 60,     # 每秒检查一次
     'trade_cooldown': 3600,   # 亏损后冷却1小时
+    # 手续费配置
+    'maker_fee': 0.0001,      # 0.01% Maker 费率
+    'taker_fee': 0.00035,     # 0.035% Taker 费率
+    'min_profit_after_fee': 0.005,  # 扣除手续费后最小盈利 0.5%
 }
 
 # ============== 日志配置 ==============
@@ -159,6 +163,17 @@ class IslandTrader:
             stop_loss = current_price - 2 * current_atr
             take_profit = current_price + 3 * current_atr
             
+            # 计算手续费和净利润
+            fee_check = self._check_profit_after_fees(
+                position_size, current_price, take_profit, stop_loss
+            )
+            
+            if not fee_check['valid']:
+                return {
+                    'action': 'HOLD',
+                    'reason': f'{symbol} {fee_check["reason"]}'
+                }
+            
             return {
                 'action': 'BUY',
                 'symbol': symbol,
@@ -168,7 +183,8 @@ class IslandTrader:
                 'stop_loss': stop_loss,
                 'take_profit': take_profit,
                 'atr': current_atr,
-                'reason': f'{symbol} 多头趋势确立，9/21金叉，ATR={current_atr:.2f}'
+                'fees': fee_check,
+                'reason': f'{symbol} 多头趋势确立，9/21金叉，ATR={current_atr:.2f}，净利{fee_check["net_profit_pct"]:.2f}%'
             }
         
         elif trend_down and death_cross:
@@ -176,6 +192,17 @@ class IslandTrader:
             position_size = self._calc_position_size(confidence)
             stop_loss = current_price + 2 * current_atr
             take_profit = current_price - 3 * current_atr
+            
+            # 计算手续费和净利润
+            fee_check = self._check_profit_after_fees(
+                position_size, current_price, take_profit, stop_loss
+            )
+            
+            if not fee_check['valid']:
+                return {
+                    'action': 'HOLD',
+                    'reason': f'{symbol} {fee_check["reason"]}'
+                }
             
             return {
                 'action': 'SELL',
@@ -186,7 +213,8 @@ class IslandTrader:
                 'stop_loss': stop_loss,
                 'take_profit': take_profit,
                 'atr': current_atr,
-                'reason': f'{symbol} 空头趋势确立，9/21死叉，ATR={current_atr:.2f}'
+                'fees': fee_check,
+                'reason': f'{symbol} 空头趋势确立，9/21死叉，ATR={current_atr:.2f}，净利{fee_check["net_profit_pct"]:.2f}%'
             }
         
         return {'action': 'HOLD', 'reason': f'{symbol} 无明确信号'}
@@ -217,6 +245,66 @@ class IslandTrader:
         if size < CONFIG['min_order_value']:
             return 0
         return round(size, 2)
+    
+    def _check_profit_after_fees(self, position_size: float, entry_price: float, 
+                                  take_profit: float, stop_loss: float) -> Dict:
+        """
+        检查扣除手续费后的净利润是否足够
+        
+        返回: {
+            'valid': bool,  # 是否值得交易
+            'gross_profit': float,  # 毛利润
+            'total_fees': float,    # 总手续费
+            'net_profit': float,    # 净利润
+            'net_profit_pct': float, # 净利润率
+            'reason': str           # 如果不值得交易，说明原因
+        }
+        """
+        # Hyperliquid 费率 (保守估计按 Taker 计算)
+        maker_fee = CONFIG['maker_fee']  # 0.01%
+        taker_fee = CONFIG['taker_fee']  # 0.035%
+        
+        # 假设最坏情况：开仓 Taker，平仓 Taker
+        # 实际如果用限价单可能是 Maker，会更便宜
+        total_fee_rate = taker_fee * 2  # 开仓 + 平仓
+        
+        # 计算毛利润（按止盈计算）
+        price_change_pct = abs(take_profit - entry_price) / entry_price
+        gross_profit = position_size * price_change_pct
+        
+        # 计算手续费
+        # 开仓手续费
+        open_fee = position_size * taker_fee
+        # 平仓手续费 (按止盈时的仓位价值计算)
+        close_position_value = position_size * (1 + price_change_pct)
+        close_fee = close_position_value * taker_fee
+        total_fees = open_fee + close_fee
+        
+        # 净利润
+        net_profit = gross_profit - total_fees
+        net_profit_pct = net_profit / position_size if position_size > 0 else 0
+        
+        # 检查是否满足最小盈利要求
+        min_profit = CONFIG['min_profit_after_fee']  # 0.5%
+        
+        if net_profit_pct < min_profit:
+            return {
+                'valid': False,
+                'gross_profit': gross_profit,
+                'total_fees': total_fees,
+                'net_profit': net_profit,
+                'net_profit_pct': net_profit_pct * 100,
+                'reason': f'净利{net_profit_pct*100:.2f}% < 最小要求{min_profit*100:.2f}%，手续费占比太高'
+            }
+        
+        return {
+            'valid': True,
+            'gross_profit': gross_profit,
+            'total_fees': total_fees,
+            'net_profit': net_profit,
+            'net_profit_pct': net_profit_pct * 100,
+            'reason': '净利润足够'
+        }
     
     def get_account_state(self) -> Dict:
         """获取账户状态"""
@@ -354,6 +442,13 @@ class IslandTrader:
             logger.info(f"   止损: ${signal['stop_loss']:.2f}")
             logger.info(f"   止盈: ${signal['take_profit']:.2f}")
             
+            # 显示手续费信息
+            if 'fees' in signal:
+                fees = signal['fees']
+                logger.info(f"   毛利润: ${fees['gross_profit']:.2f}")
+                logger.info(f"   手续费: ${fees['total_fees']:.2f}")
+                logger.info(f"   净利润: ${fees['net_profit']:.2f} ({fees['net_profit_pct']:.2f}%)")
+            
             is_buy = signal['action'] == 'BUY'
             
             # 取消现有挂单
@@ -382,6 +477,9 @@ class IslandTrader:
         logger.info(f"交易对: {CONFIG['symbols']}")
         logger.info(f"最大杠杆: {CONFIG['max_leverage']}x")
         logger.info(f"最大仓位: ${CONFIG['max_position_usd']}")
+        logger.info(f"Maker费率: {CONFIG['maker_fee']*100:.3f}%")
+        logger.info(f"Taker费率: {CONFIG['taker_fee']*100:.3f}%")
+        logger.info(f"最小净利要求: {CONFIG['min_profit_after_fee']*100:.2f}%")
         
         while True:
             try:
