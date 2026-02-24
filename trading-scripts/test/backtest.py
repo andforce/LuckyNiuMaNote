@@ -3,26 +3,71 @@
 策略回测验证程序
 验证 auto_trader 交易策略在 BTC 历史数据上的表现
 
-用法: python backtest.py
+用法:
+  python backtest.py                           # 默认: 胜率优先参数
+  python backtest.py --profile baseline        # 原始参数
+  python backtest.py --profile balanced        # 收益平衡参数 (旧 --optimized)
+  python backtest.py --profile win_rate        # 胜率优先参数
 
 注意: Hyperliquid API 仅保留约 5000 根 1h K 线（约 7 个月），
-无法获取更早的数据。默认回测 2025-08-01 ~ 2025-12-31。
+无法获取更早的数据。默认回测 2025-08-01 ~ 2026-02-20。
 """
 
+import argparse
 import requests
 from datetime import datetime
-from typing import List, Dict, Optional, Tuple
+from typing import List, Dict, Tuple
 
-# ============== 配置（与 auto_trader 一致）==============
+# ============== 配置 ==============
 INITIAL_CAPITAL = 100.0  # USDC
 TAKER_FEE = 0.00035
 MIN_PROFIT_AFTER_FEE = 0.005
-STOP_LOSS_ATR_MULT = 2
-TAKE_PROFIT_ATR_MULT = 3
+STOP_LOSS_ATR_MULT = 2   # 可改为 3 使用优化参数
+TAKE_PROFIT_ATR_MULT = 3  # 可改为 4 使用优化参数
 DEFAULT_LEVERAGE = 2
 MAX_LEVERAGE = 3
 MIN_ORDER_VALUE = 10
 TRADE_COOLDOWN_CANDLES = 1  # 亏损后冷却 1 根 K 线（1 小时）
+
+# 可切换策略档位
+STRATEGY_PROFILES = {
+    "baseline": {
+        "description": "原始参数（历史基线）",
+        "stop_loss_atr_mult": float(STOP_LOSS_ATR_MULT),
+        "take_profit_atr_mult": float(TAKE_PROFIT_ATR_MULT),
+        "loss_cooldown_candles": TRADE_COOLDOWN_CANDLES,
+    },
+    "balanced": {
+        "description": "收益平衡参数（旧 --optimized）",
+        "stop_loss_atr_mult": 3.0,
+        "take_profit_atr_mult": 4.0,
+        "loss_cooldown_candles": 1,
+    },
+    "win_rate": {
+        "description": "胜率优先参数（更宽止损 + 更近止盈 + 亏损后冷却）",
+        "stop_loss_atr_mult": 3.0,
+        "take_profit_atr_mult": 2.5,
+        "loss_cooldown_candles": 6,
+    },
+}
+DEFAULT_PROFILE = "win_rate"
+# 按币种微调（与 auto_trader 一致）
+PROFILE_SYMBOL_OVERRIDES = {
+    "win_rate": {
+        "ETH": {
+            "stop_loss_atr_mult": 3.5,
+            "take_profit_atr_mult": 2.0,
+        }
+    }
+}
+
+
+def resolve_profile_params(profile: str, symbol: str) -> Dict:
+    """基于 profile + symbol 解析最终参数"""
+    params = dict(STRATEGY_PROFILES[profile])
+    symbol_overrides = PROFILE_SYMBOL_OVERRIDES.get(profile, {})
+    params.update(symbol_overrides.get(symbol.upper(), {}))
+    return params
 
 
 def ema(data: List[float], period: int) -> List[float]:
@@ -144,10 +189,26 @@ def fetch_historical_klines(symbol: str, start_date: datetime, end_date: datetim
     return unique
 
 
-def run_backtest(klines: List[Dict], symbol: str = "BTC") -> Dict:
+def run_backtest(
+    klines: List[Dict],
+    symbol: str = "BTC",
+    profile: str = DEFAULT_PROFILE,
+    use_optimized: bool = False
+) -> Dict:
     """执行回测"""
     if len(klines) < 60:
         return {"error": "数据不足 60 根 K 线"}
+
+    # 兼容旧参数：--optimized 等价于 balanced
+    effective_profile = "balanced" if use_optimized else profile
+    if effective_profile not in STRATEGY_PROFILES:
+        valid = ", ".join(sorted(STRATEGY_PROFILES))
+        return {"error": f"未知 profile: {effective_profile}，可选: {valid}"}
+    params = resolve_profile_params(effective_profile, symbol)
+
+    sl_mult = float(params["stop_loss_atr_mult"])
+    tp_mult = float(params["take_profit_atr_mult"])
+    loss_cooldown_candles = int(params["loss_cooldown_candles"])
 
     closes = [k["close"] for k in klines]
     highs = [k["high"] for k in klines]
@@ -192,7 +253,7 @@ def run_backtest(klines: List[Dict], symbol: str = "BTC") -> Dict:
                         "timestamp": ts
                     })
                     position_side = None
-                    cooldown_until = i + TRADE_COOLDOWN_CANDLES
+                    cooldown_until = i + loss_cooldown_candles
                 elif h >= take_profit:
                     # 止盈
                     pnl_pct = (take_profit - entry_price) / entry_price
@@ -227,7 +288,7 @@ def run_backtest(klines: List[Dict], symbol: str = "BTC") -> Dict:
                         "timestamp": ts
                     })
                     position_side = None
-                    cooldown_until = i + TRADE_COOLDOWN_CANDLES
+                    cooldown_until = i + loss_cooldown_candles
                 elif l <= take_profit:
                     # 止盈（空头）
                     pnl_pct = (entry_price - take_profit) / entry_price
@@ -253,24 +314,22 @@ def run_backtest(klines: List[Dict], symbol: str = "BTC") -> Dict:
             death_cross = ema9[i - 1] >= ema21[i - 1] and ema9[i] < ema21[i]
 
             if trend_up and golden_cross:
-                confidence = calc_confidence(closes, ema9, ema21, ema55, i)
                 position_usd = min(balance * DEFAULT_LEVERAGE, balance * MAX_LEVERAGE)
                 position_usd = max(MIN_ORDER_VALUE, min(position_usd, balance * MAX_LEVERAGE))
                 if position_usd >= MIN_ORDER_VALUE:
-                    stop_loss = c - STOP_LOSS_ATR_MULT * current_atr
-                    take_profit = c + TAKE_PROFIT_ATR_MULT * current_atr
+                    stop_loss = c - sl_mult * current_atr
+                    take_profit = c + tp_mult * current_atr
                     valid, _ = check_profit_after_fees(position_usd, c, take_profit)
                     if valid:
                         position_side = "LONG"
                         entry_price = c
 
             elif trend_down and death_cross:
-                confidence = calc_confidence(closes, ema9, ema21, ema55, i)
                 position_usd = min(balance * DEFAULT_LEVERAGE, balance * MAX_LEVERAGE)
                 position_usd = max(MIN_ORDER_VALUE, min(position_usd, balance * MAX_LEVERAGE))
                 if position_usd >= MIN_ORDER_VALUE:
-                    stop_loss = c + STOP_LOSS_ATR_MULT * current_atr
-                    take_profit = c - TAKE_PROFIT_ATR_MULT * current_atr
+                    stop_loss = c + sl_mult * current_atr
+                    take_profit = c - tp_mult * current_atr
                     valid, _ = check_profit_after_fees(position_usd, c, take_profit)
                     if valid:
                         position_side = "SHORT"
@@ -303,6 +362,11 @@ def run_backtest(klines: List[Dict], symbol: str = "BTC") -> Dict:
     losses = sum(1 for t in trades if t["pnl"] <= 0)
 
     return {
+        "symbol": symbol,
+        "profile": effective_profile,
+        "stop_loss_atr_mult": sl_mult,
+        "take_profit_atr_mult": tp_mult,
+        "loss_cooldown_candles": loss_cooldown_candles,
         "initial_capital": INITIAL_CAPITAL,
         "final_balance": round(balance, 2),
         "total_return_pct": round(total_return, 2),
@@ -316,16 +380,47 @@ def run_backtest(klines: List[Dict], symbol: str = "BTC") -> Dict:
 
 
 def main():
-    print("=" * 60)
-    print("策略回测验证 - BTC 1小时K线")
-    print("=" * 60)
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "--profile",
+        choices=sorted(STRATEGY_PROFILES.keys()),
+        default=DEFAULT_PROFILE,
+        help="策略档位：baseline / balanced / win_rate",
+    )
+    parser.add_argument("--optimized", action="store_true", help="兼容旧参数，等价于 --profile balanced")
+    parser.add_argument("--symbol", default="BTC", help="回测币种，如 BTC / ETH")
+    parser.add_argument("--start-date", default="2025-08-01", help="起始日期 YYYY-MM-DD")
+    parser.add_argument("--end-date", default="2026-02-20", help="结束日期 YYYY-MM-DD")
+    args = parser.parse_args()
 
-    # Hyperliquid 仅保留约 5000 根 1h K 线，最早约 2025-07-31
-    start_date = datetime(2025, 8, 1, 0, 0, 0)
-    end_date = datetime(2025, 12, 31, 23, 59, 59)
+    symbol = args.symbol.upper().strip()
+    selected_profile = "balanced" if args.optimized else args.profile
+    if selected_profile not in STRATEGY_PROFILES:
+        print(f"未知 profile: {selected_profile}")
+        return
+    profile_info = resolve_profile_params(selected_profile, symbol)
+
+    try:
+        start_date = datetime.strptime(args.start_date, "%Y-%m-%d")
+        end_date = datetime.strptime(args.end_date, "%Y-%m-%d").replace(hour=23, minute=59, second=59)
+    except ValueError:
+        print("日期格式错误，请使用 YYYY-MM-DD，例如 2025-08-01")
+        return
+
+    print("=" * 60)
+    print(f"策略回测验证 - {symbol} 1小时K线")
+    print(f"策略档位: {selected_profile} ({profile_info['description']})")
+    print(
+        f"参数: SL={profile_info['stop_loss_atr_mult']} ATR, "
+        f"TP={profile_info['take_profit_atr_mult']} ATR, "
+        f"亏损冷却={profile_info['loss_cooldown_candles']} 根K"
+    )
+    if args.optimized:
+        print("(兼容模式: --optimized => --profile balanced)")
+    print("=" * 60)
 
     print(f"\n正在获取 {start_date.date()} ~ {end_date.date()} 的历史数据...")
-    klines = fetch_historical_klines("BTC", start_date, end_date, "1h")
+    klines = fetch_historical_klines(symbol, start_date, end_date, "1h")
 
     if len(klines) < 60:
         print(f"错误: 仅获取到 {len(klines)} 根 K 线，需要至少 60 根")
@@ -333,7 +428,7 @@ def main():
 
     print(f"获取到 {len(klines)} 根 1 小时 K 线")
 
-    result = run_backtest(klines)
+    result = run_backtest(klines, symbol=symbol, profile=selected_profile)
 
     if "error" in result:
         print(f"回测失败: {result['error']}")

@@ -33,14 +33,45 @@ CONFIG = {
     'default_leverage': 2,
     'max_position_usd': 294,  # $98 * 3
     'min_order_value': 10,    # Hyperliquid 最小订单金额
-    'stop_loss_atr_mult': 2,
-    'take_profit_atr_mult': 3,
+    'strategy_profile': 'wf_stable',  # 可选: balanced / win_rate / wf_stable
     'check_interval': 60,     # 每秒检查一次
-    'trade_cooldown': 3600,   # 亏损后冷却1小时
+    'trade_cooldown': 21600,  # 亏损后冷却6小时（对应回测冷却6根1h K）
     # 手续费配置
     'maker_fee': 0.0001,      # 0.01% Maker 费率
     'taker_fee': 0.00035,     # 0.035% Taker 费率
     'min_profit_after_fee': 0.005,  # 扣除手续费后最小盈利 0.5%
+}
+
+# 和回测保持一致：按档位 + 按币种覆盖
+STRATEGY_PROFILES = {
+    'balanced': {
+        'default': {
+            'stop_loss_atr_mult': 3.0,
+            'take_profit_atr_mult': 4.0,
+        },
+        'symbols': {},
+    },
+    'win_rate': {
+        'default': {
+            'stop_loss_atr_mult': 3.0,
+            'take_profit_atr_mult': 2.5,
+        },
+        'symbols': {
+            # ETH 波动更大，止损略放宽
+            'ETH': {'stop_loss_atr_mult': 3.5, 'take_profit_atr_mult': 2.0},
+        },
+    },
+    'wf_stable': {
+        # walk-forward 跨窗口统一复核后的 BTC 推荐参数
+        'default': {
+            'stop_loss_atr_mult': 3.0,
+            'take_profit_atr_mult': 2.0,
+        },
+        'symbols': {
+            # ETH 继续沿用波动适配参数
+            'ETH': {'stop_loss_atr_mult': 3.5, 'take_profit_atr_mult': 2.0},
+        },
+    },
 }
 
 # ============== 日志配置 ==============
@@ -92,6 +123,14 @@ class IslandTrader:
         self.last_loss_time = None
         self.daily_pnl = 0.0
         self.peak_balance = 0.0
+
+    def _get_symbol_strategy(self, symbol: str) -> Dict[str, float]:
+        """按 profile + symbol 获取策略参数"""
+        profile_name = CONFIG.get('strategy_profile', 'wf_stable')
+        profile = STRATEGY_PROFILES.get(profile_name, STRATEGY_PROFILES['wf_stable'])
+        params = dict(profile['default'])
+        params.update(profile.get('symbols', {}).get(symbol, {}))
+        return params
         
     def get_klines(self, symbol: str, interval: str = '1h', limit: int = 100) -> List[Dict]:
         """获取K线数据"""
@@ -147,6 +186,9 @@ class IslandTrader:
         # 计算ATR
         current_atr = atr(highs, lows, closes, 14)
         current_price = closes[-1]
+        strategy = self._get_symbol_strategy(symbol)
+        stop_loss_atr_mult = strategy['stop_loss_atr_mult']
+        take_profit_atr_mult = strategy['take_profit_atr_mult']
         
         # 趋势判断
         trend_up = ema9[-1] > ema21[-1] > ema55[-1]
@@ -160,8 +202,8 @@ class IslandTrader:
         if trend_up and golden_cross:
             confidence = self._calc_confidence(closes, ema9, ema21, ema55)
             position_size = self._calc_position_size(confidence)
-            stop_loss = current_price - 2 * current_atr
-            take_profit = current_price + 3 * current_atr
+            stop_loss = current_price - stop_loss_atr_mult * current_atr
+            take_profit = current_price + take_profit_atr_mult * current_atr
             
             # 计算手续费和净利润
             fee_check = self._check_profit_after_fees(
@@ -184,14 +226,18 @@ class IslandTrader:
                 'take_profit': take_profit,
                 'atr': current_atr,
                 'fees': fee_check,
-                'reason': f'{symbol} 多头趋势确立，9/21金叉，ATR={current_atr:.2f}，净利{fee_check["net_profit_pct"]:.2f}%'
+                'reason': (
+                    f'{symbol} 多头趋势确立，9/21金叉，'
+                    f'SL={stop_loss_atr_mult}×ATR TP={take_profit_atr_mult}×ATR，'
+                    f'净利{fee_check["net_profit_pct"]:.2f}%'
+                )
             }
-        
+
         elif trend_down and death_cross:
             confidence = self._calc_confidence(closes, ema9, ema21, ema55)
             position_size = self._calc_position_size(confidence)
-            stop_loss = current_price + 2 * current_atr
-            take_profit = current_price - 3 * current_atr
+            stop_loss = current_price + stop_loss_atr_mult * current_atr
+            take_profit = current_price - take_profit_atr_mult * current_atr
             
             # 计算手续费和净利润
             fee_check = self._check_profit_after_fees(
@@ -214,7 +260,11 @@ class IslandTrader:
                 'take_profit': take_profit,
                 'atr': current_atr,
                 'fees': fee_check,
-                'reason': f'{symbol} 空头趋势确立，9/21死叉，ATR={current_atr:.2f}，净利{fee_check["net_profit_pct"]:.2f}%'
+                'reason': (
+                    f'{symbol} 空头趋势确立，9/21死叉，'
+                    f'SL={stop_loss_atr_mult}×ATR TP={take_profit_atr_mult}×ATR，'
+                    f'净利{fee_check["net_profit_pct"]:.2f}%'
+                )
             }
         
         return {'action': 'HOLD', 'reason': f'{symbol} 无明确信号'}
@@ -475,6 +525,12 @@ class IslandTrader:
         """主循环"""
         logger.info("🚀 Island Trader 启动")
         logger.info(f"交易对: {CONFIG['symbols']}")
+        logger.info(f"策略档位: {CONFIG.get('strategy_profile', 'wf_stable')}")
+        for symbol in CONFIG['symbols']:
+            p = self._get_symbol_strategy(symbol)
+            logger.info(
+                f"{symbol} 参数: SL={p['stop_loss_atr_mult']}xATR, TP={p['take_profit_atr_mult']}xATR"
+            )
         logger.info(f"最大杠杆: {CONFIG['max_leverage']}x")
         logger.info(f"最大仓位: ${CONFIG['max_position_usd']}")
         logger.info(f"Maker费率: {CONFIG['maker_fee']*100:.3f}%")
