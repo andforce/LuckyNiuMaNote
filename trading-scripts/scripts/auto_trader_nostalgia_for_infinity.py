@@ -558,7 +558,8 @@ class NostalgiaForInfinityTrader:
     def has_position(self, symbol: str) -> bool:
         account = self.get_account_state()
         for pos in account.get("positions", []):
-            if pos.get("position", {}).get("coin") == symbol:
+            p = pos.get("position", {})
+            if p.get("coin") == symbol and float(p.get("szi", 0)) != 0:
                 return True
         return False
 
