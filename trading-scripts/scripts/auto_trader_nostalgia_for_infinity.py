@@ -41,7 +41,7 @@ CONFIG = {
     "min_order_value": 10,
     "check_interval": 60,
     "trade_cooldown": 21600,
-    "trade_side": "both",  # both / long_only / short_only
+    "trade_side": "short_only",  # both / long_only / short_only
     "maker_fee": 0.0001,
     "taker_fee": 0.00035,
     "min_profit_after_fee": 0.005,
