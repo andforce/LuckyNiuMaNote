@@ -1,10 +1,10 @@
 {
   "strategy": {
-    "name": "趋势跟踪突破策略",
-    "version": "1.0",
-    "description": "基于多时间框架均线系统的趋势跟踪策略，结合波动率突破和动态杠杆管理",
+    "name": "NFI Short-Only 反转策略",
+    "version": "2.0",
+    "description": "基于 NostalgiaForInfinity 思路的短线反转系统。当前实盘默认 short_only，重点捕捉下行趋势中的反弹衰竭后做空机会。",
     "createdAt": "2026-02-22",
-    "updatedAt": "2026-02-22",
+    "updatedAt": "2026-02-24",
     "status": "active"
   },
   "markets": {
@@ -15,41 +15,60 @@
   "indicators": [
     {
       "name": "EMA 快线",
-      "period": 9,
-      "description": "快速响应价格变化"
+      "period": 20,
+      "description": "短期均线，识别回弹位置"
     },
     {
-      "name": "EMA 中线", 
-      "period": 21,
-      "description": "主要趋势判断"
+      "name": "EMA 趋势线",
+      "period": 50,
+      "description": "中期趋势过滤"
     },
     {
-      "name": "EMA 慢线",
-      "period": 55,
-      "description": "长期趋势确认"
+      "name": "EMA 长期线",
+      "period": 200,
+      "description": "大级别方向锚点"
+    },
+    {
+      "name": "RSI 快速",
+      "period": 4,
+      "description": "短周期超买判断"
+    },
+    {
+      "name": "RSI 主周期",
+      "period": 14,
+      "description": "确认反转强度"
+    },
+    {
+      "name": "Bollinger Bands",
+      "period": 20,
+      "description": "识别反弹触顶区域"
     },
     {
       "name": "ATR",
       "period": 14,
-      "description": "真实波幅，用于止损止盈计算"
+      "description": "波动率驱动止损止盈"
+    },
+    {
+      "name": "Volume SMA",
+      "period": 30,
+      "description": "成交量过滤，避免低流动性假信号"
     }
   ],
   "entryRules": {
     "long": [
-      "EMA 9 > EMA 21 > EMA 55（多头排列）",
-      "金叉信号：EMA 9 上穿 EMA 21",
-      "当前价格 > EMA 21"
+      "当前实盘默认关闭做多（trade_side=short_only）"
     ],
     "short": [
-      "EMA 9 < EMA 21 < EMA 55（空头排列）",
-      "死叉信号：EMA 9 下穿 EMA 21",
-      "当前价格 < EMA 21"
+      "EMA50 < EMA200 且价格低于 EMA200 上方容差",
+      "价格触及布林上轨附近或反弹至 EMA20 上方",
+      "RSI(4/14) 进入超买区（BTC 默认 79/62，ETH 默认 75/62）",
+      "成交量通过过滤，且价格结构出现回落确认"
     ]
   },
   "exitRules": {
-    "stopLoss": "2 倍 ATR",
-    "takeProfit": "3 倍 ATR（1.5:1 风险收益比）",
-    "trailingStop": "3% 移动止损（盈利后触发）"
+    "stopLoss": "ATR 止损：BTC 2.4x / ETH 2.8x",
+    "takeProfit": "ATR 止盈：BTC 4.0x / ETH 2.8x",
+    "trailingStop": "未启用（固定 ATR 出场）"
   },
   "positionSizing": {
     "maxLeverage": 3,
@@ -59,17 +78,17 @@
   },
   "riskManagement": {
     "maxDailyDrawdown": "20%",
-    "stopLossPerTrade": "5%",
-    "cooldownAfterLoss": "60 分钟",
+    "stopLossPerTrade": "ATR 动态止损",
+    "cooldownAfterLoss": "4 小时",
     "maxConcurrentPositions": 2
   },
   "performance": {
-    "initialCapital": 98,
-    "targetReturn": "10x",
+    "initialCapital": 100,
+    "targetReturn": "稳健复利优先",
     "maxAcceptableLoss": "100%（可归零）",
     "notes": [
-      "最大杠杆限制为 3x，降低爆仓风险",
-      "以 $98 本金计算，最大仓位约 $294"
+      "默认只做空，优先防守型趋势反转",
+      "全量可用数据回测（至 2026-02-24）：BTC +25.84%，ETH +46.47%"
     ]
   }
 }

@@ -70,4 +70,4 @@ pip install requests
 - **标的**: BTC
 - **周期**: 1 小时 K 线
 - **初始资金**: 100 USDC
-- **规则**: 与 auto_trader.py 完全一致（EMA 排列 + 金叉/死叉 + fee_check）
+- **规则**: 与旧版 EMA 趋势策略一致（EMA 排列 + 金叉/死叉 + fee_check）

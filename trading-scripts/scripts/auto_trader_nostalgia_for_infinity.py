@@ -2,8 +2,7 @@
 """
 NostalgiaForInfinity-inspired Hyperliquid auto trader.
 
-This script is intentionally standalone and does not modify or import
-logic from scripts/auto_trader.py, so strategies remain isolated.
+This is the active standalone trading script.
 
 Notes:
 - This is an adaptation of NFI concepts to Hyperliquid futures flow.

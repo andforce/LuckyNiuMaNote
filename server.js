@@ -186,7 +186,7 @@ app.get('/api/chart/:symbol', async (req, res) => {
       k.atr = atr14[i];
     });
     
-    // 严格按 auto_trader.py 规则：EMA排列 + 金叉/死叉 + fee_check（净利润>=0.5%）
+    // 图表信号：EMA排列 + 金叉/死叉 + fee_check（仅用于可视化参考）
     const TAKER_FEE = 0.00035;
     const MIN_PROFIT_AFTER_FEE = 0.005;
     const DEFAULT_POSITION_USD = 100;  // 用于 fee_check 的假设仓位
@@ -210,7 +210,7 @@ app.get('/api/chart/:symbol', async (req, res) => {
       
       if (!prev.ema9 || !prev.ema21 || !curr.ema9 || !curr.ema21 || !curr.ema55 || !curr.atr) continue;
       
-      // 做多：trend_up + golden_cross + fee_check（与 auto_trader.py 完全一致）
+      // 做多参考信号：trend_up + golden_cross + fee_check
       if (prev.ema9 <= prev.ema21 && curr.ema9 > curr.ema21) {
         const trendUp = curr.ema9 > curr.ema21 && curr.ema21 > curr.ema55;
         const stopLoss = curr.close - 2 * curr.atr;
@@ -226,7 +226,7 @@ app.get('/api/chart/:symbol', async (req, res) => {
           });
         }
       }
-      // 做空：trend_down + death_cross + fee_check（与 auto_trader.py 完全一致）
+      // 做空参考信号：trend_down + death_cross + fee_check
       else if (prev.ema9 >= prev.ema21 && curr.ema9 < curr.ema21) {
         const trendDown = curr.ema9 < curr.ema21 && curr.ema21 < curr.ema55;
         const stopLoss = curr.close + 2 * curr.atr;
@@ -1343,25 +1343,25 @@ app.get('/', (req, res) => {
             if (goldenCross) {
               signalHtml = '\u003cdiv style="margin: 10px 0; padding: 12px; background: linear-gradient(135deg, rgba(0,255,159,0.15), rgba(0,255,159,0.05)); border: 2px solid var(--accent); border-radius: 8px; text-align: center; animation: pulse 2s infinite;"\u003e';
               signalHtml += '\u003cdiv style="font-size: 2em; margin-bottom: 5px;"\u003e🔥✨\u003c/div\u003e';
-              signalHtml += '\u003cdiv style="color: var(--accent); font-weight: 700; font-size: 1.1em;"\u003e金叉买入信号\u003c/div\u003e';
-              signalHtml += '\u003cdiv style="color: var(--text-secondary); font-size: 0.85em; margin-top: 5px;"\u003eEMA9 上穿 EMA21，建议做多\u003c/div\u003e';
+              signalHtml += '\u003cdiv style="color: var(--accent); font-weight: 700; font-size: 1.1em;"\u003eEMA金叉参考信号\u003c/div\u003e';
+              signalHtml += '\u003cdiv style="color: var(--text-secondary); font-size: 0.85em; margin-top: 5px;"\u003eEMA9 上穿 EMA21（图表参考，实盘以 NFI 条件为准）\u003c/div\u003e';
               signalHtml += '\u003c/div\u003e';
             } else if (deathCross) {
               signalHtml = '\u003cdiv style="margin: 10px 0; padding: 12px; background: linear-gradient(135deg, rgba(255,0,128,0.15), rgba(255,0,128,0.05)); border: 2px solid var(--cyber-pink); border-radius: 8px; text-align: center; animation: pulse 2s infinite;"\u003e';
               signalHtml += '\u003cdiv style="font-size: 2em; margin-bottom: 5px;"\u003e❄️⚡\u003c/div\u003e';
-              signalHtml += '\u003cdiv style="color: var(--cyber-pink); font-weight: 700; font-size: 1.1em;"\u003e死叉卖出信号\u003c/div\u003e';
-              signalHtml += '\u003cdiv style="color: var(--text-secondary); font-size: 0.85em; margin-top: 5px;"\u003eEMA9 下穿 EMA21，建议做空\u003c/div\u003e';
+              signalHtml += '\u003cdiv style="color: var(--cyber-pink); font-weight: 700; font-size: 1.1em;"\u003eEMA死叉参考信号\u003c/div\u003e';
+              signalHtml += '\u003cdiv style="color: var(--text-secondary); font-size: 0.85em; margin-top: 5px;"\u003eEMA9 下穿 EMA21（图表参考，实盘以 NFI 条件为准）\u003c/div\u003e';
               signalHtml += '\u003c/div\u003e';
             } else {
               // 无信号时的EMA关系提示
               const ema9Above = ind.ema9 > ind.ema21;
               if (ema9Above) {
                 signalHtml = '\u003cdiv style="margin: 10px 0; padding: 10px; background: rgba(0,255,159,0.05); border-radius: 6px; text-align: center; color: var(--text-secondary); font-size: 0.9em;"\u003e';
-                signalHtml += '📊 EMA9 在 EMA21 之上，但尚未形成金叉';
+                signalHtml += '📊 EMA9 在 EMA21 之上（参考状态）';
                 signalHtml += '\u003c/div\u003e';
               } else {
                 signalHtml = '\u003cdiv style="margin: 10px 0; padding: 10px; background: rgba(255,0,128,0.05); border-radius: 6px; text-align: center; color: var(--text-secondary); font-size: 0.9em;"\u003e';
-                signalHtml += '📊 EMA9 在 EMA21 之下，但尚未形成死叉';
+                signalHtml += '📊 EMA9 在 EMA21 之下（参考状态）';
                 signalHtml += '\u003c/div\u003e';
               }
             }
@@ -1444,7 +1444,7 @@ app.get('/chart', (req, res) => {
   const content = `
     <header>
       <h1>📊 1分钟K线图表 + EMA</h1>
-      <p class="subtitle">严格按 auto_trader 规则：EMA排列 + 金叉/死叉 + 手续费后净利≥0.5%</p>
+      <p class="subtitle">当前实盘策略：NFI short_only；下方 EMA 金叉/死叉仅作图表参考</p>
       <div style="margin-top: 15px; display: flex; justify-content: center; gap: 15px;">
         <a href="/" style="font-size: 0.85em;">← 返回首页</a>
         <a href="/strategy" style="font-size: 0.85em;">🎯 交易策略</a>
@@ -1477,7 +1477,7 @@ app.get('/chart', (req, res) => {
       </div>
     </div>
     <div style="margin-top: 15px; padding: 12px 16px; background: var(--bg-card); border-radius: 6px; border: 1px solid var(--border); font-size: 0.85em; color: var(--text-muted);">
-      <strong style="color: var(--text-primary);">📋 规则（与 auto_trader.py 一致）：</strong> 做多=多头排列+金叉+净利≥0.5%；做空=空头排列+死叉+净利≥0.5%。止损2×ATR，止盈3×ATR。
+      <strong style="color: var(--text-primary);">📋 当前实盘规则：</strong> NFI short_only（默认只做空），基于 EMA/RSI/布林带/成交量过滤。此页展示的 EMA 金叉死叉仅用于辅助观察，不等同实盘入场条件。
     </div>
     
     <!-- 引入 Chart.js -->
