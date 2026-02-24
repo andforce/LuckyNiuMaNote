@@ -40,7 +40,7 @@ CONFIG = {
     "max_position_usd": 294,
     "min_order_value": 10,
     "check_interval": 60,
-    "trade_cooldown": 21600,
+    "trade_cooldown": 14400,  # 4h，对齐收益最优组合的冷却设置
     "trade_side": "short_only",  # both / long_only / short_only
     "maker_fee": 0.0001,
     "taker_fee": 0.00035,
@@ -65,25 +65,25 @@ NFI_DEFAULTS = {
     "regime_price_floor": 0.95,
     "max_breakdown_pct": 0.10,
     "enable_short": True,
-    "rsi_fast_sell": 77.0,
-    "rsi_main_sell": 64.0,
+    "rsi_fast_sell": 79.0,
+    "rsi_main_sell": 62.0,
     "bb_reject_buffer": 0.99,
     "ema_bounce_buffer": 1.015,
     "regime_price_ceiling": 1.05,
     "max_breakout_pct": 0.10,
     "min_volume_ratio": 0.65,
-    "stop_loss_atr_mult": 2.8,
-    "take_profit_atr_mult": 3.4,
+    "stop_loss_atr_mult": 2.4,
+    "take_profit_atr_mult": 4.0,
 }
 
 NFI_SYMBOL_OVERRIDES = {
     "ETH": {
         "rsi_fast_buy": 21.0,
         "rsi_main_buy": 34.0,
-        "rsi_fast_sell": 79.0,
-        "rsi_main_sell": 66.0,
-        "stop_loss_atr_mult": 3.0,
-        "take_profit_atr_mult": 3.2,
+        "rsi_fast_sell": 75.0,
+        "rsi_main_sell": 62.0,
+        "stop_loss_atr_mult": 2.8,
+        "take_profit_atr_mult": 2.8,
     }
 }
 
