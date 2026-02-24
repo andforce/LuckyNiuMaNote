@@ -66,6 +66,138 @@ app.use(express.static(path.join(__dirname, 'public')));
 
 // ==================== API 路由 ====================
 
+// 技术指标数据 (EMA等)
+app.get('/api/indicators', (req, res) => {
+  try {
+    const indicatorsPath = path.join(__dirname, 'logs', 'indicators.json');
+    let indicators = {};
+    
+    if (fs.existsSync(indicatorsPath)) {
+      const data = fs.readFileSync(indicatorsPath, 'utf-8');
+      indicators = JSON.parse(data);
+    }
+    
+    res.json({
+      success: true,
+      timestamp: Date.now(),
+      indicators: indicators
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
+// 历史K线数据（带EMA和信号）
+app.get('/api/chart/:symbol', async (req, res) => {
+  try {
+    const symbol = req.params.symbol.toUpperCase();
+    const days = parseInt(req.query.days) || 30;
+    
+    // 直接在这里实现数据获取逻辑
+    const url = 'https://api.hyperliquid.xyz/info';
+    const end_time = Date.now();
+    const start_time = end_time - (days * 24 * 60 * 60 * 1000);
+    
+    const payload = {
+      type: 'candleSnapshot',
+      req: {
+        coin: symbol,
+        interval: '1h',
+        startTime: start_time,
+        endTime: end_time
+      }
+    };
+    
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+    
+    const candles = await response.json();
+    
+    if (!candles || candles.length < 60) {
+      return res.json({ success: false, error: '数据不足' });
+    }
+    
+    // 解析K线
+    const klines = candles.map(c => ({
+      timestamp: c.t,
+      open: parseFloat(c.o),
+      high: parseFloat(c.h),
+      low: parseFloat(c.l),
+      close: parseFloat(c.c),
+      volume: parseFloat(c.v)
+    }));
+    
+    // 计算EMA
+    const ema = (data, period) => {
+      const multiplier = 2 / (period + 1);
+      const ema = [data[0]];
+      for (let i = 1; i < data.length; i++) {
+        ema.push(data[i] * multiplier + ema[i-1] * (1 - multiplier));
+      }
+      return ema;
+    };
+    
+    const closes = klines.map(k => k.close);
+    const ema9 = ema(closes, 9);
+    const ema21 = ema(closes, 21);
+    const ema55 = ema(closes, 55);
+    
+    // 添加EMA到K线
+    klines.forEach((k, i) => {
+      k.ema9 = ema9[i];
+      k.ema21 = ema21[i];
+      k.ema55 = ema55[i];
+    });
+    
+    // 检测金叉死叉
+    const signals = [];
+    for (let i = 1; i < klines.length; i++) {
+      const prev = klines[i-1];
+      const curr = klines[i];
+      
+      if (prev.ema9 && prev.ema21 && curr.ema9 && curr.ema21) {
+        if (prev.ema9 <= prev.ema21 && curr.ema9 > curr.ema21) {
+          signals.push({
+            type: 'golden_cross',
+            timestamp: curr.timestamp,
+            price: curr.close,
+            index: i,
+            label: '金叉买入'
+          });
+        } else if (prev.ema9 >= prev.ema21 && curr.ema9 < curr.ema21) {
+          signals.push({
+            type: 'death_cross',
+            timestamp: curr.timestamp,
+            price: curr.close,
+            index: i,
+            label: '死叉卖出'
+          });
+        }
+      }
+    }
+    
+    res.json({
+      success: true,
+      symbol: symbol,
+      klines: klines,
+      signals: signals
+    });
+    
+  } catch (error) {
+    console.error('Chart API error:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
 // 实时持仓和账户数据
 app.get('/api/position', async (req, res) => {
   try {
@@ -989,6 +1121,20 @@ app.get('/', (req, res) => {
       </div>
     </div>
     
+    <!-- EMA 技术指标展示 -->
+    <div class="position-card" id="indicators-card" style="display:none; border-color: var(--accent);">
+      <div class="position-header">
+        <h3 style="color: var(--accent);">📈 EMA 技术指标 (1小时)</h3>
+        <span class="live-badge">● LIVE</span>
+      </div>
+      <div id="indicators-content">
+        <div class="loading">加载中...</div>
+      </div>
+      <div class="position-footer">
+        <span id="indicators-update-time">--</span>
+      </div>
+    </div>
+    
     ${walletHTML}
     
     <div class="entries">
@@ -1088,9 +1234,406 @@ app.get('/', (req, res) => {
         }
       }
       
+      // EMA 指标更新
+      async function updateIndicators() {
+        try {
+          const res = await fetch('/api/indicators');
+          const data = await res.json();
+          
+          if (!data.success || !data.indicators) {
+            document.getElementById('indicators-content').innerHTML = '\u003cdiv class="error"\u003e获取指标失败\u003c/div\u003e';
+            return;
+          }
+          
+          const indicators = data.indicators;
+          const card = document.getElementById('indicators-card');
+          card.style.display = 'block';
+          
+          let html = '';
+          
+          for (const [symbol, ind] of Object.entries(indicators)) {
+            const trendUp = ind.trend_up;
+            const trendDown = ind.trend_down;
+            const goldenCross = ind.golden_cross;
+            const deathCross = ind.death_cross;
+            
+            // 趋势文本和图标
+            let trendIcon = '➡️';
+            let trendText = '震荡整理';
+            let trendColor = 'var(--text-muted)';
+            let trendBg = 'rgba(110, 118, 129, 0.1)';
+            
+            if (trendUp) {
+              trendIcon = '📈';
+              trendText = '上升趋势';
+              trendColor = 'var(--accent)';
+              trendBg = 'rgba(0, 255, 159, 0.1)';
+            } else if (trendDown) {
+              trendIcon = '📉';
+              trendText = '下降趋势';
+              trendColor = 'var(--cyber-pink)';
+              trendBg = 'rgba(255, 0, 128, 0.1)';
+            }
+            
+            // 金叉/死叉信号区域
+            let signalHtml = '';
+            if (goldenCross) {
+              signalHtml = '\u003cdiv style="margin: 10px 0; padding: 12px; background: linear-gradient(135deg, rgba(0,255,159,0.15), rgba(0,255,159,0.05)); border: 2px solid var(--accent); border-radius: 8px; text-align: center; animation: pulse 2s infinite;"\u003e';
+              signalHtml += '\u003cdiv style="font-size: 2em; margin-bottom: 5px;"\u003e🔥✨\u003c/div\u003e';
+              signalHtml += '\u003cdiv style="color: var(--accent); font-weight: 700; font-size: 1.1em;"\u003e金叉买入信号\u003c/div\u003e';
+              signalHtml += '\u003cdiv style="color: var(--text-secondary); font-size: 0.85em; margin-top: 5px;"\u003eEMA9 上穿 EMA21，建议做多\u003c/div\u003e';
+              signalHtml += '\u003c/div\u003e';
+            } else if (deathCross) {
+              signalHtml = '\u003cdiv style="margin: 10px 0; padding: 12px; background: linear-gradient(135deg, rgba(255,0,128,0.15), rgba(255,0,128,0.05)); border: 2px solid var(--cyber-pink); border-radius: 8px; text-align: center; animation: pulse 2s infinite;"\u003e';
+              signalHtml += '\u003cdiv style="font-size: 2em; margin-bottom: 5px;"\u003e❄️⚡\u003c/div\u003e';
+              signalHtml += '\u003cdiv style="color: var(--cyber-pink); font-weight: 700; font-size: 1.1em;"\u003e死叉卖出信号\u003c/div\u003e';
+              signalHtml += '\u003cdiv style="color: var(--text-secondary); font-size: 0.85em; margin-top: 5px;"\u003eEMA9 下穿 EMA21，建议做空\u003c/div\u003e';
+              signalHtml += '\u003c/div\u003e';
+            } else {
+              // 无信号时的EMA关系提示
+              const ema9Above = ind.ema9 > ind.ema21;
+              if (ema9Above) {
+                signalHtml = '\u003cdiv style="margin: 10px 0; padding: 10px; background: rgba(0,255,159,0.05); border-radius: 6px; text-align: center; color: var(--text-secondary); font-size: 0.9em;"\u003e';
+                signalHtml += '📊 EMA9 在 EMA21 之上，但尚未形成金叉';
+                signalHtml += '\u003c/div\u003e';
+              } else {
+                signalHtml = '\u003cdiv style="margin: 10px 0; padding: 10px; background: rgba(255,0,128,0.05); border-radius: 6px; text-align: center; color: var(--text-secondary); font-size: 0.9em;"\u003e';
+                signalHtml += '📊 EMA9 在 EMA21 之下，但尚未形成死叉';
+                signalHtml += '\u003c/div\u003e';
+              }
+            }
+            
+            // 价格与EMA关系
+            const priceVsEma9 = ind.price > ind.ema9 ? '⬆️ 价格>EMA9' : '⬇️ 价格<EMA9';
+            const priceVsEma21 = ind.price > ind.ema21 ? '⬆️ 价格>EMA21' : '⬇️ 价格<EMA21';
+            
+            html += '\u003cdiv style="margin-bottom: 20px; padding: 20px; background: var(--bg-secondary); border-radius: 12px; border: 1px solid var(--border);"\u003e';
+            
+            // 头部：币种 + 趋势
+            html += '\u003cdiv style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px; padding-bottom: 15px; border-bottom: 1px solid var(--border);"\u003e';
+            html += '\u003cdiv style="display: flex; align-items: center; gap: 10px;"\u003e';
+            html += '\u003cspan style="font-size: 1.5em; font-weight: 700; color: var(--text-primary);"\u003e' + symbol + '\u003c/span\u003e';
+            html += '\u003cspan style="font-size: 1.2em;"\u003e' + trendIcon + '\u003c/span\u003e';
+            html += '\u003c/div\u003e';
+            html += '\u003cspan style="padding: 6px 12px; background: ' + trendBg + '; color: ' + trendColor + '; border-radius: 20px; font-weight: 600; font-size: 0.9em;"\u003e' + trendText + '\u003c/span\u003e';
+            html += '\u003c/div\u003e';
+            
+            // EMA 数值展示
+            html += '\u003cdiv style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin: 15px 0;"\u003e';
+            
+            // EMA9
+            const ema9Icon = ind.ema9 > ind.ema21 ? '🟢' : '🔴';
+            html += '\u003cdiv style="padding: 15px; background: var(--bg-card); border-radius: 8px; text-align: center; position: relative; overflow: hidden;"\u003e';
+            html += '\u003cdiv style="font-size: 0.8em; color: var(--text-muted); margin-bottom: 8px; display: flex; align-items: center; justify-content: center; gap: 5px;"\u003e' + ema9Icon + ' EMA9\u003c/div\u003e';
+            html += '\u003cdiv style="font-size: 1.2em; font-weight: 700; color: var(--accent); font-family: monospace;"\u003e$' + (ind.ema9 ? ind.ema9.toFixed(2) : '-') + '\u003c/div\u003e';
+            if (goldenCross) {
+              html += '\u003cdiv style="position: absolute; top: 2px; right: 2px; font-size: 1.2em;"\u003e✨\u003c/div\u003e';
+            }
+            html += '\u003c/div\u003e';
+            
+            // EMA21
+            html += '\u003cdiv style="padding: 15px; background: var(--bg-card); border-radius: 8px; text-align: center; position: relative;"\u003e';
+            html += '\u003cdiv style="font-size: 0.8em; color: var(--text-muted); margin-bottom: 8px;"\u003eEMA21\u003c/div\u003e';
+            html += '\u003cdiv style="font-size: 1.2em; font-weight: 700; color: var(--cyber-blue); font-family: monospace;"\u003e$' + (ind.ema21 ? ind.ema21.toFixed(2) : '-') + '\u003c/div\u003e';
+            html += '\u003c/div\u003e';
+            
+            // EMA55
+            html += '\u003cdiv style="padding: 15px; background: var(--bg-card); border-radius: 8px; text-align: center;"\u003e';
+            html += '\u003cdiv style="font-size: 0.8em; color: var(--text-muted); margin-bottom: 8px;"\u003eEMA55\u003c/div\u003e';
+            html += '\u003cdiv style="font-size: 1.2em; font-weight: 700; color: var(--cyber-pink); font-family: monospace;"\u003e$' + (ind.ema55 ? ind.ema55.toFixed(2) : '-') + '\u003c/div\u003e';
+            html += '\u003c/div\u003e';
+            
+            html += '\u003c/div\u003e';
+            
+            // 信号区域
+            html += signalHtml;
+            
+            // 价格和ATR
+            html += '\u003cdiv style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 15px; padding-top: 15px; border-top: 1px solid var(--border);"\u003e';
+            html += '\u003cdiv style="text-align: center;"\u003e\u003cdiv style="font-size: 0.8em; color: var(--text-muted); margin-bottom: 5px;"\u003e当前价格\u003c/div\u003e\u003cdiv style="font-size: 1.3em; font-weight: 700; color: var(--cyber-blue); font-family: monospace;"\u003e$' + (ind.price ? ind.price.toFixed(2) : '-') + '\u003c/div\u003e\u003c/div\u003e';
+            html += '\u003cdiv style="text-align: center;"\u003e\u003cdiv style="font-size: 0.8em; color: var(--text-muted); margin-bottom: 5px;"\u003eATR(14)\u003c/div\u003e\u003cdiv style="font-size: 1.3em; font-weight: 600; font-family: monospace;"\u003e' + (ind.atr ? ind.atr.toFixed(2) : '-') + '\u003c/div\u003e\u003c/div\u003e';
+            html += '\u003c/div\u003e';
+            
+            html += '\u003c/div\u003e';
+          }
+          
+          document.getElementById('indicators-content').innerHTML = html;
+          document.getElementById('indicators-update-time').textContent = '更新于 ' + new Date().toLocaleTimeString('zh-CN');
+          
+        } catch (err) {
+          console.error('Failed to update indicators:', err);
+        }
+      }
+      
       // 立即更新一次，然后每 30 秒更新
       updatePosition();
+      updateIndicators();
       setInterval(updatePosition, 30000);
+      setInterval(updateIndicators, 30000);
+    </script>
+  `;
+  
+  res.send(getHTML(content));
+});
+
+// K线图表页面
+app.get('/chart', (req, res) => {
+  const content = `
+    <header>
+      <h1>📊 K线图表 + EMA</h1>
+      <p class="subtitle">实时K线图与EMA技术指标分析</p>
+      <div style="margin-top: 15px; display: flex; justify-content: center; gap: 15px;">
+        <a href="/" style="font-size: 0.85em;">← 返回首页</a>
+        <a href="/strategy" style="font-size: 0.85em;">🎯 交易策略</a>
+      </div>
+    </header>
+    
+    <div style="margin: 20px 0; text-align: center;">
+      <button onclick="loadChart('BTC')" id="btn-btc" style="padding: 10px 20px; margin: 0 5px; background: var(--accent); color: var(--bg-primary); border: none; border-radius: 4px; cursor: pointer; font-weight: 600;">BTC</button>
+      <button onclick="loadChart('ETH')" id="btn-eth" style="padding: 10px 20px; margin: 0 5px; background: var(--bg-card); color: var(--text-primary); border: 1px solid var(--border); border-radius: 4px; cursor: pointer;">ETH</button>
+    </div>
+    
+    <div id="chart-container" style="background: var(--bg-card); padding: 20px; border-radius: 8px; border: 1px solid var(--border);">
+      <div style="text-align: center; padding: 50px; color: var(--text-muted);">
+        正在加载图表数据...
+      </div>
+    </div>
+    
+    <div id="signals-container" style="margin-top: 20px;"></div>
+    
+    <!-- 引入 Chart.js -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3.0.0/dist/chartjs-adapter-date-fns.bundle.min.js"></script>
+    <script>
+      let currentChart = null;
+      let currentSymbol = 'BTC';
+      
+      async function loadChart(symbol) {
+        currentSymbol = symbol;
+        
+        // 更新按钮样式
+        document.getElementById('btn-btc').style.background = symbol === 'BTC' ? 'var(--accent)' : 'var(--bg-card)';
+        document.getElementById('btn-btc').style.color = symbol === 'BTC' ? 'var(--bg-primary)' : 'var(--text-primary)';
+        document.getElementById('btn-eth').style.background = symbol === 'ETH' ? 'var(--accent)' : 'var(--bg-card)';
+        document.getElementById('btn-eth').style.color = symbol === 'ETH' ? 'var(--bg-primary)' : 'var(--text-primary)';
+        
+        document.getElementById('chart-container').innerHTML = '<div style="text-align: center; padding: 50px; color: var(--text-muted);">正在加载 ' + symbol + ' 数据...</div>';
+        
+        try {
+          const res = await fetch('/api/chart/' + symbol + '?days=30');
+          const data = await res.json();
+          
+          if (!data.success) {
+            document.getElementById('chart-container').innerHTML = '<div style="text-align: center; padding: 50px; color: var(--cyber-pink);">加载失败: ' + (data.error || '未知错误') + '</div>';
+            return;
+          }
+          
+          renderChart(data);
+          renderSignals(data.signals);
+          
+        } catch (err) {
+          console.error('加载图表失败:', err);
+          document.getElementById('chart-container').innerHTML = '<div style="text-align: center; padding: 50px; color: var(--cyber-pink);">加载失败，请刷新重试</div>';
+        }
+      }
+      
+      function renderChart(data) {
+        const container = document.getElementById('chart-container');
+        container.innerHTML = '<canvas id="klineChart"></canvas>';
+        
+        const ctx = document.getElementById('klineChart').getContext('2d');
+        
+        // 准备数据
+        const labels = data.klines.map(k => new Date(k.timestamp));
+        const prices = data.klines.map(k => k.close);
+        const ema9 = data.klines.map(k => k.ema9);
+        const ema21 = data.klines.map(k => k.ema21);
+        const ema55 = data.klines.map(k => k.ema55);
+        
+        // 准备金叉死叉标记点
+        const goldenCrossPoints = data.signals
+          .filter(s => s.type === 'golden_cross')
+          .map(s => ({
+            x: new Date(s.timestamp),
+            y: s.price
+          }));
+        
+        const deathCrossPoints = data.signals
+          .filter(s => s.type === 'death_cross')
+          .map(s => ({
+            x: new Date(s.timestamp),
+            y: s.price
+          }));
+        
+        if (currentChart) {
+          currentChart.destroy();
+        }
+        
+        currentChart = new Chart(ctx, {
+          type: 'line',
+          data: {
+            labels: labels,
+            datasets: [
+              {
+                label: '价格',
+                data: prices,
+                borderColor: '#00d4ff',
+                backgroundColor: 'rgba(0, 212, 255, 0.1)',
+                borderWidth: 2,
+                pointRadius: 0,
+                pointHoverRadius: 4,
+                tension: 0.1
+              },
+              {
+                label: 'EMA9',
+                data: ema9,
+                borderColor: '#00ff9f',
+                borderWidth: 2,
+                pointRadius: 0,
+                pointHoverRadius: 3,
+                tension: 0.3
+              },
+              {
+                label: 'EMA21',
+                data: ema21,
+                borderColor: '#bf00ff',
+                borderWidth: 2,
+                pointRadius: 0,
+                pointHoverRadius: 3,
+                tension: 0.3
+              },
+              {
+                label: 'EMA55',
+                data: ema55,
+                borderColor: '#ff0080',
+                borderWidth: 2,
+                pointRadius: 0,
+                pointHoverRadius: 3,
+                tension: 0.3,
+                borderDash: [5, 5]
+              },
+              {
+                label: '金叉',
+                data: goldenCrossPoints,
+                backgroundColor: '#00ff9f',
+                borderColor: '#00ff9f',
+                pointStyle: 'triangle',
+                pointRadius: 10,
+                pointHoverRadius: 12,
+                showLine: false
+              },
+              {
+                label: '死叉',
+                data: deathCrossPoints,
+                backgroundColor: '#ff0080',
+                borderColor: '#ff0080',
+                pointStyle: 'triangle',
+                pointRadius: 10,
+                pointHoverRadius: 12,
+                rotation: 180,
+                showLine: false
+              }
+            ]
+          },
+          options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            height: 500,
+            interaction: {
+              mode: 'index',
+              intersect: false
+            },
+            plugins: {
+              title: {
+                display: true,
+                text: data.symbol + '/USD 1小时K线 + EMA',
+                color: '#e6edf3',
+                font: { size: 16 }
+              },
+              legend: {
+                labels: { color: '#8b949e' }
+              },
+              tooltip: {
+                backgroundColor: 'rgba(22, 27, 34, 0.95)',
+                titleColor: '#e6edf3',
+                bodyColor: '#8b949e',
+                borderColor: '#30363d',
+                borderWidth: 1,
+                callbacks: {
+                  label: function(context) {
+                    let label = context.dataset.label || '';
+                    if (label) {
+                      label += ': ';
+                    }
+                    if (context.parsed.y !== null) {
+                      label += '$' + context.parsed.y.toFixed(2);
+                    }
+                    return label;
+                  }
+                }
+              }
+            },
+            scales: {
+              x: {
+                type: 'time',
+                time: {
+                  displayFormats: {
+                    hour: 'MM-dd HH:mm',
+                    day: 'MM-dd'
+                  }
+                },
+                ticks: { color: '#6e7681' },
+                grid: { color: '#30363d' }
+              },
+              y: {
+                ticks: { 
+                  color: '#6e7681',
+                  callback: function(value) {
+                    return '$' + value.toLocaleString();
+                  }
+                },
+                grid: { color: '#30363d' }
+              }
+            }
+          }
+        });
+      }
+      
+      function renderSignals(signals) {
+        const container = document.getElementById('signals-container');
+        
+        if (!signals || signals.length === 0) {
+          container.innerHTML = '<div style="text-align: center; padding: 20px; color: var(--text-muted);">近30天无金叉/死叉信号</div>';
+          return;
+        }
+        
+        let html = '<div style="background: var(--bg-card); padding: 20px; border-radius: 8px; border: 1px solid var(--border);">';
+        html += '<h3 style="margin-bottom: 15px; color: var(--accent);">📍 近期交易信号 (' + signals.length + '个)</h3>';
+        html += '<div style="display: grid; gap: 10px;">';
+        
+        signals.slice(-10).reverse().forEach(s => {
+          const isGolden = s.type === 'golden_cross';
+          const color = isGolden ? 'var(--accent)' : 'var(--cyber-pink)';
+          const bg = isGolden ? 'rgba(0,255,159,0.1)' : 'rgba(255,0,128,0.1)';
+          const icon = isGolden ? '🔥✨' : '❄️⚡';
+          const text = isGolden ? '金叉买入' : '死叉卖出';
+          const date = new Date(s.timestamp).toLocaleString('zh-CN');
+          
+          html += '<div style="display: flex; justify-content: space-between; align-items: center; padding: 12px; background: ' + bg + '; border-radius: 6px; border-left: 3px solid ' + color + ';">';
+          html += '<div>';
+          html += '<div style="font-size: 1.2em; margin-bottom: 4px;">' + icon + ' ' + text + '</div>';
+          html += '<div style="font-size: 0.85em; color: var(--text-muted);">' + date + '</div>';
+          html += '</div>';
+          html += '<div style="font-size: 1.3em; font-weight: 700; color: ' + color + '; font-family: monospace;">$' + s.price.toFixed(2) + '</div>';
+          html += '</div>';
+        });
+        
+        html += '</div></div>';
+        container.innerHTML = html;
+      }
+      
+      // 初始加载BTC
+      loadChart('BTC');
     </script>
   `;
   
