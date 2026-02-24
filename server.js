@@ -94,18 +94,26 @@ app.get('/api/indicators', (req, res) => {
 app.get('/api/chart/:symbol', async (req, res) => {
   try {
     const symbol = req.params.symbol.toUpperCase();
-    const days = parseInt(req.query.days) || 30;
+    const interval = (req.query.interval || '1h').toLowerCase();
+    const is1m = interval === '1m';
     
-    // 直接在这里实现数据获取逻辑
     const url = 'https://api.hyperliquid.xyz/info';
     const end_time = Date.now();
-    const start_time = end_time - (days * 24 * 60 * 60 * 1000);
+    let start_time;
+    let minutes;
+    if (is1m) {
+      minutes = parseInt(req.query.minutes) || (parseInt(req.query.hours) || 24) * 60;
+      start_time = end_time - (minutes * 60 * 1000);
+    } else {
+      const days = parseInt(req.query.days) || 30;
+      start_time = end_time - (days * 24 * 60 * 60 * 1000);
+    }
     
     const payload = {
       type: 'candleSnapshot',
       req: {
         coin: symbol,
-        interval: '1h',
+        interval: is1m ? '1m' : '1h',
         startTime: start_time,
         endTime: end_time
       }
@@ -118,8 +126,8 @@ app.get('/api/chart/:symbol', async (req, res) => {
     });
     
     const candles = await response.json();
-    
-    if (!candles || candles.length < 60) {
+    const minCandles = is1m ? Math.max(9, Math.min(minutes || 1440, 55)) : 60;
+    if (!candles || candles.length < minCandles) {
       return res.json({ success: false, error: '数据不足' });
     }
     
@@ -185,6 +193,7 @@ app.get('/api/chart/:symbol', async (req, res) => {
     res.json({
       success: true,
       symbol: symbol,
+      interval: is1m ? '1m' : '1h',
       klines: klines,
       signals: signals
     });
@@ -1380,96 +1389,145 @@ app.get('/', (req, res) => {
 app.get('/chart', (req, res) => {
   const content = `
     <header>
-      <h1>📊 K线图表 + EMA</h1>
-      <p class="subtitle">实时K线图与EMA技术指标分析</p>
+      <h1>📊 1分钟K线图表 + EMA</h1>
+      <p class="subtitle">与自动交易60秒检查同步，实时K线图与EMA技术指标分析</p>
       <div style="margin-top: 15px; display: flex; justify-content: center; gap: 15px;">
         <a href="/" style="font-size: 0.85em;">← 返回首页</a>
         <a href="/strategy" style="font-size: 0.85em;">🎯 交易策略</a>
       </div>
     </header>
     
-    <div style="margin: 20px 0; text-align: center;">
-      <button onclick="loadChart('BTC')" id="btn-btc" style="padding: 10px 20px; margin: 0 5px; background: var(--accent); color: var(--bg-primary); border: none; border-radius: 4px; cursor: pointer; font-weight: 600;">BTC</button>
-      <button onclick="loadChart('ETH')" id="btn-eth" style="padding: 10px 20px; margin: 0 5px; background: var(--bg-card); color: var(--text-primary); border: 1px solid var(--border); border-radius: 4px; cursor: pointer;">ETH</button>
+    <div style="margin: 20px 0; display: flex; flex-wrap: wrap; justify-content: center; align-items: center; gap: 10px;">
+      <span style="color: var(--text-muted); margin-right: 5px;">币种:</span>
+      <button onclick="loadChart1m('BTC')" id="btn-btc-1m" style="padding: 8px 16px; margin: 0 2px; background: var(--accent); color: var(--bg-primary); border: none; border-radius: 4px; cursor: pointer; font-weight: 600;">BTC</button>
+      <button onclick="loadChart1m('ETH')" id="btn-eth-1m" style="padding: 8px 16px; margin: 0 2px; background: var(--bg-card); color: var(--text-primary); border: 1px solid var(--border); border-radius: 4px; cursor: pointer;">ETH</button>
+      <span style="color: var(--text-muted); margin: 0 10px 0 15px;">时间范围:</span>
+      <button onclick="setRange1m(10)" id="btn-range-10m" style="padding: 8px 14px; margin: 0 2px; background: var(--bg-card); color: var(--text-primary); border: 1px solid var(--border); border-radius: 4px; cursor: pointer;">10分钟</button>
+      <button onclick="setRange1m(30)" id="btn-range-30m" style="padding: 8px 14px; margin: 0 2px; background: var(--bg-card); color: var(--text-primary); border: 1px solid var(--border); border-radius: 4px; cursor: pointer;">30分钟</button>
+      <button onclick="setRange1m(60)" id="btn-range-60m" style="padding: 8px 14px; margin: 0 2px; background: var(--bg-card); color: var(--text-primary); border: 1px solid var(--border); border-radius: 4px; cursor: pointer;">1小时</button>
+      <button onclick="setRange1m(1440)" id="btn-range-24h" style="padding: 8px 14px; margin: 0 2px; background: var(--accent); color: var(--bg-primary); border: none; border-radius: 4px; cursor: pointer; font-weight: 600;">24小时</button>
     </div>
     
-    <div id="chart-container" style="background: var(--bg-card); padding: 20px; border-radius: 8px; border: 1px solid var(--border);">
+    <div id="chart-container-1m" style="background: var(--bg-card); padding: 20px; border-radius: 8px; border: 1px solid var(--border); min-height: 400px;">
       <div style="text-align: center; padding: 50px; color: var(--text-muted);">
-        正在加载图表数据...
+        正在加载1分钟图表数据...
       </div>
     </div>
     
-    <div id="signals-container" style="margin-top: 20px;"></div>
+    <div id="signals-container-1m" style="margin-top: 20px;"></div>
     
     <!-- 引入 Chart.js -->
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3.0.0/dist/chartjs-adapter-date-fns.bundle.min.js"></script>
     <script>
-      let currentChart = null;
-      let currentSymbol = 'BTC';
+      function renderSignals(signals, containerId, emptyText) {
+        const container = document.getElementById(containerId);
+        
+        if (!signals || signals.length === 0) {
+          container.innerHTML = '<div style="text-align: center; padding: 20px; color: var(--text-muted);">' + (emptyText || '无金叉/死叉信号') + '</div>';
+          return;
+        }
+        
+        let html = '<div style="background: var(--bg-card); padding: 20px; border-radius: 8px; border: 1px solid var(--border);">';
+        html += '<h3 style="margin-bottom: 15px; color: var(--accent);">📍 近期交易信号 (' + signals.length + '个)</h3>';
+        html += '<div style="display: grid; gap: 10px;">';
+        
+        signals.slice(-10).reverse().forEach(s => {
+          const isGolden = s.type === 'golden_cross';
+          const color = isGolden ? 'var(--accent)' : 'var(--cyber-pink)';
+          const bg = isGolden ? 'rgba(0,255,159,0.1)' : 'rgba(255,0,128,0.1)';
+          const icon = isGolden ? '🔥✨' : '❄️⚡';
+          const text = isGolden ? '金叉买入' : '死叉卖出';
+          const date = new Date(s.timestamp).toLocaleString('zh-CN');
+          
+          html += '<div style="display: flex; justify-content: space-between; align-items: center; padding: 12px; background: ' + bg + '; border-radius: 6px; border-left: 3px solid ' + color + ';">';
+          html += '<div>';
+          html += '<div style="font-size: 1.2em; margin-bottom: 4px;">' + icon + ' ' + text + '</div>';
+          html += '<div style="font-size: 0.85em; color: var(--text-muted);">' + date + '</div>';
+          html += '</div>';
+          html += '<div style="font-size: 1.3em; font-weight: 700; color: ' + color + '; font-family: monospace;">$' + s.price.toFixed(2) + '</div>';
+          html += '</div>';
+        });
+        
+        html += '</div></div>';
+        container.innerHTML = html;
+      }
       
-      async function loadChart(symbol) {
-        currentSymbol = symbol;
+      let currentChart1m = null;
+      let currentSymbol1m = 'BTC';
+      let currentMinutes1m = 1440;
+      
+      const rangeLabels = { 10: '10分钟', 30: '30分钟', 60: '1小时', 1440: '24小时' };
+      
+      function setRange1m(minutes) {
+        currentMinutes1m = minutes;
+        ['btn-range-10m', 'btn-range-30m', 'btn-range-60m', 'btn-range-24h'].forEach((id, i) => {
+          const btn = document.getElementById(id);
+          const isActive = (id === 'btn-range-10m' && minutes === 10) || (id === 'btn-range-30m' && minutes === 30) || (id === 'btn-range-60m' && minutes === 60) || (id === 'btn-range-24h' && minutes === 1440);
+          btn.style.background = isActive ? 'var(--accent)' : 'var(--bg-card)';
+          btn.style.color = isActive ? 'var(--bg-primary)' : 'var(--text-primary)';
+          btn.style.border = isActive ? 'none' : '1px solid var(--border)';
+          btn.style.fontWeight = isActive ? '600' : 'normal';
+        });
+        loadChart1m(currentSymbol1m);
+      }
+      
+      async function loadChart1m(symbol) {
+        currentSymbol1m = symbol;
         
-        // 更新按钮样式
-        document.getElementById('btn-btc').style.background = symbol === 'BTC' ? 'var(--accent)' : 'var(--bg-card)';
-        document.getElementById('btn-btc').style.color = symbol === 'BTC' ? 'var(--bg-primary)' : 'var(--text-primary)';
-        document.getElementById('btn-eth').style.background = symbol === 'ETH' ? 'var(--accent)' : 'var(--bg-card)';
-        document.getElementById('btn-eth').style.color = symbol === 'ETH' ? 'var(--bg-primary)' : 'var(--text-primary)';
+        document.getElementById('btn-btc-1m').style.background = symbol === 'BTC' ? 'var(--accent)' : 'var(--bg-card)';
+        document.getElementById('btn-btc-1m').style.color = symbol === 'BTC' ? 'var(--bg-primary)' : 'var(--text-primary)';
+        document.getElementById('btn-eth-1m').style.background = symbol === 'ETH' ? 'var(--accent)' : 'var(--bg-card)';
+        document.getElementById('btn-eth-1m').style.color = symbol === 'ETH' ? 'var(--bg-primary)' : 'var(--text-primary)';
         
-        document.getElementById('chart-container').innerHTML = '<div style="text-align: center; padding: 50px; color: var(--text-muted);">正在加载 ' + symbol + ' 数据...</div>';
+        const rangeText = rangeLabels[currentMinutes1m] || currentMinutes1m + '分钟';
+        document.getElementById('chart-container-1m').innerHTML = '<div style="text-align: center; padding: 50px; color: var(--text-muted);">正在加载 ' + symbol + ' 近' + rangeText + ' 1分钟数据...</div>';
         
         try {
-          const res = await fetch('/api/chart/' + symbol + '?days=30');
+          const res = await fetch('/api/chart/' + symbol + '?interval=1m&minutes=' + currentMinutes1m);
           const data = await res.json();
           
           if (!data.success) {
-            document.getElementById('chart-container').innerHTML = '<div style="text-align: center; padding: 50px; color: var(--cyber-pink);">加载失败: ' + (data.error || '未知错误') + '</div>';
+            document.getElementById('chart-container-1m').innerHTML = '<div style="text-align: center; padding: 50px; color: var(--cyber-pink);">加载失败: ' + (data.error || '未知错误') + '</div>';
             return;
           }
           
-          renderChart(data);
-          renderSignals(data.signals);
+          renderChart1m(data, currentMinutes1m);
+          const emptyText = '近' + rangeText + '无金叉/死叉信号';
+          renderSignals(data.signals, 'signals-container-1m', emptyText);
           
         } catch (err) {
-          console.error('加载图表失败:', err);
-          document.getElementById('chart-container').innerHTML = '<div style="text-align: center; padding: 50px; color: var(--cyber-pink);">加载失败，请刷新重试</div>';
+          console.error('加载1分钟图表失败:', err);
+          document.getElementById('chart-container-1m').innerHTML = '<div style="text-align: center; padding: 50px; color: var(--cyber-pink);">加载失败，请刷新重试</div>';
         }
       }
       
-      function renderChart(data) {
-        const container = document.getElementById('chart-container');
-        container.innerHTML = '<canvas id="klineChart"></canvas>';
+      function renderChart1m(data, minutes) {
+        const container = document.getElementById('chart-container-1m');
+        const rangeText = rangeLabels[minutes || currentMinutes1m] || (minutes || 1440) + '分钟';
+        container.innerHTML = '<canvas id="klineChart1m"></canvas>';
         
-        const ctx = document.getElementById('klineChart').getContext('2d');
+        const ctx = document.getElementById('klineChart1m').getContext('2d');
         
-        // 准备数据
         const labels = data.klines.map(k => new Date(k.timestamp));
         const prices = data.klines.map(k => k.close);
         const ema9 = data.klines.map(k => k.ema9);
         const ema21 = data.klines.map(k => k.ema21);
         const ema55 = data.klines.map(k => k.ema55);
         
-        // 准备金叉死叉标记点
         const goldenCrossPoints = data.signals
           .filter(s => s.type === 'golden_cross')
-          .map(s => ({
-            x: new Date(s.timestamp),
-            y: s.price
-          }));
+          .map(s => ({ x: new Date(s.timestamp), y: s.price }));
         
         const deathCrossPoints = data.signals
           .filter(s => s.type === 'death_cross')
-          .map(s => ({
-            x: new Date(s.timestamp),
-            y: s.price
-          }));
+          .map(s => ({ x: new Date(s.timestamp), y: s.price }));
         
-        if (currentChart) {
-          currentChart.destroy();
+        if (currentChart1m) {
+          currentChart1m.destroy();
         }
         
-        currentChart = new Chart(ctx, {
+        currentChart1m = new Chart(ctx, {
           type: 'line',
           data: {
             labels: labels,
@@ -1546,7 +1604,7 @@ app.get('/chart', (req, res) => {
             plugins: {
               title: {
                 display: true,
-                text: data.symbol + '/USD 1小时K线 + EMA',
+                text: data.symbol + '/USD 1分钟K线 + EMA（近' + rangeText + '）',
                 color: '#e6edf3',
                 font: { size: 16 }
               },
@@ -1562,12 +1620,8 @@ app.get('/chart', (req, res) => {
                 callbacks: {
                   label: function(context) {
                     let label = context.dataset.label || '';
-                    if (label) {
-                      label += ': ';
-                    }
-                    if (context.parsed.y !== null) {
-                      label += '$' + context.parsed.y.toFixed(2);
-                    }
+                    if (label) label += ': ';
+                    if (context.parsed.y !== null) label += '$' + context.parsed.y.toFixed(2);
                     return label;
                   }
                 }
@@ -1578,7 +1632,8 @@ app.get('/chart', (req, res) => {
                 type: 'time',
                 time: {
                   displayFormats: {
-                    hour: 'MM-dd HH:mm',
+                    minute: 'HH:mm',
+                    hour: 'HH:mm',
                     day: 'MM-dd'
                   }
                 },
@@ -1599,41 +1654,8 @@ app.get('/chart', (req, res) => {
         });
       }
       
-      function renderSignals(signals) {
-        const container = document.getElementById('signals-container');
-        
-        if (!signals || signals.length === 0) {
-          container.innerHTML = '<div style="text-align: center; padding: 20px; color: var(--text-muted);">近30天无金叉/死叉信号</div>';
-          return;
-        }
-        
-        let html = '<div style="background: var(--bg-card); padding: 20px; border-radius: 8px; border: 1px solid var(--border);">';
-        html += '<h3 style="margin-bottom: 15px; color: var(--accent);">📍 近期交易信号 (' + signals.length + '个)</h3>';
-        html += '<div style="display: grid; gap: 10px;">';
-        
-        signals.slice(-10).reverse().forEach(s => {
-          const isGolden = s.type === 'golden_cross';
-          const color = isGolden ? 'var(--accent)' : 'var(--cyber-pink)';
-          const bg = isGolden ? 'rgba(0,255,159,0.1)' : 'rgba(255,0,128,0.1)';
-          const icon = isGolden ? '🔥✨' : '❄️⚡';
-          const text = isGolden ? '金叉买入' : '死叉卖出';
-          const date = new Date(s.timestamp).toLocaleString('zh-CN');
-          
-          html += '<div style="display: flex; justify-content: space-between; align-items: center; padding: 12px; background: ' + bg + '; border-radius: 6px; border-left: 3px solid ' + color + ';">';
-          html += '<div>';
-          html += '<div style="font-size: 1.2em; margin-bottom: 4px;">' + icon + ' ' + text + '</div>';
-          html += '<div style="font-size: 0.85em; color: var(--text-muted);">' + date + '</div>';
-          html += '</div>';
-          html += '<div style="font-size: 1.3em; font-weight: 700; color: ' + color + '; font-family: monospace;">$' + s.price.toFixed(2) + '</div>';
-          html += '</div>';
-        });
-        
-        html += '</div></div>';
-        container.innerHTML = html;
-      }
-      
-      // 初始加载BTC
-      loadChart('BTC');
+      // 初始加载
+      loadChart1m('BTC');
     </script>
   `;
   
