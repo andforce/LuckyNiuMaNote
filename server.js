@@ -66,21 +66,169 @@ app.use(express.static(path.join(__dirname, 'public')));
 
 // ==================== API 路由 ====================
 
-// 技术指标数据 (EMA等)
-app.get('/api/indicators', (req, res) => {
+// NFI 策略指标计算（与 auto_trader_nostalgia_for_infinity.py 一致）
+const NFI_EMA_FAST = 20, NFI_EMA_TREND = 50, NFI_EMA_LONG = 200;
+const NFI_RSI_FAST = 4, NFI_RSI_MAIN = 14;
+const NFI_ATR_PERIOD = 14, NFI_BB_PERIOD = 20, NFI_BB_STDDEV = 2.0;
+const NFI_VOLUME_SMA = 30;
+
+function nfiEma(values, period) {
+  if (!values.length) return [];
+  const mult = 2 / (period + 1);
+  const out = [values[0]];
+  for (let i = 1; i < values.length; i++) {
+    out.push(values[i] * mult + out[i - 1] * (1 - mult));
+  }
+  return out;
+}
+
+function nfiSma(values, period) {
+  const out = [];
+  let running = 0;
+  for (let i = 0; i < values.length; i++) {
+    running += values[i];
+    if (i >= period) running -= values[i - period];
+    const count = i >= period - 1 ? period : i + 1;
+    out.push(running / count);
+  }
+  return out;
+}
+
+function nfiRollingStd(values, period) {
+  const out = [];
+  for (let i = 0; i < values.length; i++) {
+    const start = Math.max(0, i - period + 1);
+    const win = values.slice(start, i + 1);
+    const mean = win.reduce((a, b) => a + b, 0) / win.length;
+    const variance = win.reduce((s, x) => s + (x - mean) ** 2, 0) / win.length;
+    out.push(Math.sqrt(variance));
+  }
+  return out;
+}
+
+function nfiBollingerBands(values, period, stdMult) {
+  const mid = nfiSma(values, period);
+  const std = nfiRollingStd(values, period);
+  return {
+    mid,
+    upper: mid.map((m, i) => m + stdMult * std[i]),
+    lower: mid.map((m, i) => m - stdMult * std[i])
+  };
+}
+
+function nfiRsiWilder(values, period) {
+  if (values.length < 2) return values.map(() => 50);
+  const changes = values.slice(1).map((v, i) => v - values[i]);
+  const gains = changes.map(c => Math.max(c, 0));
+  const losses = changes.map(c => Math.max(-c, 0));
+  const out = [50, ...Array(values.length - 1).fill(50)];
+  if (changes.length < period) return out;
+  let avgGain = gains.slice(0, period).reduce((a, b) => a + b, 0) / period;
+  let avgLoss = losses.slice(0, period).reduce((a, b) => a + b, 0) / period;
+  for (let i = period; i < changes.length; i++) {
+    avgGain = (avgGain * (period - 1) + gains[i]) / period;
+    avgLoss = (avgLoss * (period - 1) + losses[i]) / period;
+    out[i + 1] = avgLoss === 0 ? 100 : 100 - 100 / (1 + avgGain / avgLoss);
+  }
+  return out;
+}
+
+function nfiAtrWilder(highs, lows, closes, period) {
+  if (closes.length < 2) return closes.map(() => 0);
+  const tr = [0];
+  for (let i = 1; i < closes.length; i++) {
+    tr.push(Math.max(
+      highs[i] - lows[i],
+      Math.abs(highs[i] - closes[i - 1]),
+      Math.abs(lows[i] - closes[i - 1])
+    ));
+  }
+  const out = [0];
+  let running = 0;
+  for (let i = 1; i < closes.length; i++) {
+    running += tr[i];
+    out.push(i <= period ? running / i : (out[i - 1] * (period - 1) + tr[i]) / period);
+  }
+  return out;
+}
+
+async function fetchNfiKlines(symbol, limit = 260) {
+  const url = 'https://api.hyperliquid.xyz/info';
+  const end = Date.now();
+  const start = end - limit * 60 * 60 * 1000;
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      type: 'candleSnapshot',
+      req: { coin: symbol, interval: '1h', startTime: start, endTime: end }
+    })
+  });
+  const data = await res.json();
+  return (data || []).map(c => ({
+    timestamp: c.t,
+    open: parseFloat(c.o),
+    high: parseFloat(c.h),
+    low: parseFloat(c.l),
+    close: parseFloat(c.c),
+    volume: parseFloat(c.v)
+  }));
+}
+
+async function computeNfiIndicators(symbol) {
+  const klines = await fetchNfiKlines(symbol);
+  if (klines.length < NFI_EMA_LONG + 5) {
+    return null;
+  }
+  const closes = klines.map(k => k.close);
+  const highs = klines.map(k => k.high);
+  const lows = klines.map(k => k.low);
+  const volumes = klines.map(k => k.volume);
+
+  const emaFast = nfiEma(closes, NFI_EMA_FAST);
+  const emaTrend = nfiEma(closes, NFI_EMA_TREND);
+  const emaLong = nfiEma(closes, NFI_EMA_LONG);
+  const rsiFast = nfiRsiWilder(closes, NFI_RSI_FAST);
+  const rsiMain = nfiRsiWilder(closes, NFI_RSI_MAIN);
+  const atrVals = nfiAtrWilder(highs, lows, closes, NFI_ATR_PERIOD);
+  const bb = nfiBollingerBands(closes, NFI_BB_PERIOD, NFI_BB_STDDEV);
+  const volumeSma = nfiSma(volumes, NFI_VOLUME_SMA);
+
+  const i = closes.length - 1;
+  const price = closes[i];
+  return {
+    price,
+    ema_fast: emaFast[i],
+    ema_trend: emaTrend[i],
+    ema_long: emaLong[i],
+    rsi_fast: rsiFast[i],
+    rsi_main: rsiMain[i],
+    atr: atrVals[i],
+    bb_upper: bb.upper[i],
+    bb_mid: bb.mid[i],
+    bb_lower: bb.lower[i],
+    volume: volumes[i],
+    volume_sma: volumeSma[i],
+    trend_up: emaTrend[i] > emaLong[i],
+    trend_down: emaTrend[i] < emaLong[i],
+    regime_long: emaTrend[i] > emaLong[i] && price > emaLong[i] * 0.95,
+    regime_short: emaTrend[i] < emaLong[i] && price < emaLong[i] * 1.05
+  };
+}
+
+// 技术指标数据 (NFI 策略)
+app.get('/api/indicators', async (req, res) => {
   try {
-    const indicatorsPath = path.join(__dirname, 'logs', 'indicators.json');
-    let indicators = {};
-    
-    if (fs.existsSync(indicatorsPath)) {
-      const data = fs.readFileSync(indicatorsPath, 'utf-8');
-      indicators = JSON.parse(data);
+    const symbols = ['BTC', 'ETH'];
+    const indicators = {};
+    for (const symbol of symbols) {
+      const ind = await computeNfiIndicators(symbol);
+      if (ind) indicators[symbol] = ind;
     }
-    
     res.json({
       success: true,
       timestamp: Date.now(),
-      indicators: indicators
+      indicators
     });
   } catch (error) {
     res.status(500).json({
@@ -1184,10 +1332,10 @@ app.get('/', (req, res) => {
       </div>
     </div>
     
-    <!-- EMA 技术指标展示 -->
+    <!-- NFI 策略技术指标展示 -->
     <div class="position-card" id="indicators-card" style="display:none; border-color: var(--accent);">
       <div class="position-header">
-        <h3 style="color: var(--accent);">📈 EMA 技术指标 (1小时)</h3>
+        <h3 style="color: var(--accent);">📈 NFI 技术指标 (1小时)</h3>
         <span class="live-badge">● LIVE</span>
       </div>
       <div id="indicators-content">
@@ -1297,7 +1445,7 @@ app.get('/', (req, res) => {
         }
       }
       
-      // EMA 指标更新
+      // NFI 指标更新
       async function updateIndicators() {
         try {
           const res = await fetch('/api/indicators');
@@ -1317,10 +1465,7 @@ app.get('/', (req, res) => {
           for (const [symbol, ind] of Object.entries(indicators)) {
             const trendUp = ind.trend_up;
             const trendDown = ind.trend_down;
-            const goldenCross = ind.golden_cross;
-            const deathCross = ind.death_cross;
             
-            // 趋势文本和图标
             let trendIcon = '➡️';
             let trendText = '震荡整理';
             let trendColor = 'var(--text-muted)';
@@ -1328,51 +1473,21 @@ app.get('/', (req, res) => {
             
             if (trendUp) {
               trendIcon = '📈';
-              trendText = '上升趋势';
+              trendText = '上升趋势 (EMA50>200)';
               trendColor = 'var(--accent)';
               trendBg = 'rgba(0, 255, 159, 0.1)';
             } else if (trendDown) {
               trendIcon = '📉';
-              trendText = '下降趋势';
+              trendText = '下降趋势 (EMA50<200)';
               trendColor = 'var(--cyber-pink)';
               trendBg = 'rgba(255, 0, 128, 0.1)';
             }
             
-            // 金叉/死叉信号区域
-            let signalHtml = '';
-            if (goldenCross) {
-              signalHtml = '\u003cdiv style="margin: 10px 0; padding: 12px; background: linear-gradient(135deg, rgba(0,255,159,0.15), rgba(0,255,159,0.05)); border: 2px solid var(--accent); border-radius: 8px; text-align: center; animation: pulse 2s infinite;"\u003e';
-              signalHtml += '\u003cdiv style="font-size: 2em; margin-bottom: 5px;"\u003e🔥✨\u003c/div\u003e';
-              signalHtml += '\u003cdiv style="color: var(--accent); font-weight: 700; font-size: 1.1em;"\u003eEMA金叉参考信号\u003c/div\u003e';
-              signalHtml += '\u003cdiv style="color: var(--text-secondary); font-size: 0.85em; margin-top: 5px;"\u003eEMA9 上穿 EMA21（图表参考，实盘以 NFI 条件为准）\u003c/div\u003e';
-              signalHtml += '\u003c/div\u003e';
-            } else if (deathCross) {
-              signalHtml = '\u003cdiv style="margin: 10px 0; padding: 12px; background: linear-gradient(135deg, rgba(255,0,128,0.15), rgba(255,0,128,0.05)); border: 2px solid var(--cyber-pink); border-radius: 8px; text-align: center; animation: pulse 2s infinite;"\u003e';
-              signalHtml += '\u003cdiv style="font-size: 2em; margin-bottom: 5px;"\u003e❄️⚡\u003c/div\u003e';
-              signalHtml += '\u003cdiv style="color: var(--cyber-pink); font-weight: 700; font-size: 1.1em;"\u003eEMA死叉参考信号\u003c/div\u003e';
-              signalHtml += '\u003cdiv style="color: var(--text-secondary); font-size: 0.85em; margin-top: 5px;"\u003eEMA9 下穿 EMA21（图表参考，实盘以 NFI 条件为准）\u003c/div\u003e';
-              signalHtml += '\u003c/div\u003e';
-            } else {
-              // 无信号时的EMA关系提示
-              const ema9Above = ind.ema9 > ind.ema21;
-              if (ema9Above) {
-                signalHtml = '\u003cdiv style="margin: 10px 0; padding: 10px; background: rgba(0,255,159,0.05); border-radius: 6px; text-align: center; color: var(--text-secondary); font-size: 0.9em;"\u003e';
-                signalHtml += '📊 EMA9 在 EMA21 之上（参考状态）';
-                signalHtml += '\u003c/div\u003e';
-              } else {
-                signalHtml = '\u003cdiv style="margin: 10px 0; padding: 10px; background: rgba(255,0,128,0.05); border-radius: 6px; text-align: center; color: var(--text-secondary); font-size: 0.9em;"\u003e';
-                signalHtml += '📊 EMA9 在 EMA21 之下（参考状态）';
-                signalHtml += '\u003c/div\u003e';
-              }
-            }
-            
-            // 价格与EMA关系
-            const priceVsEma9 = ind.price > ind.ema9 ? '⬆️ 价格>EMA9' : '⬇️ 价格<EMA9';
-            const priceVsEma21 = ind.price > ind.ema21 ? '⬆️ 价格>EMA21' : '⬇️ 价格<EMA21';
+            const volOk = ind.volume_sma > 0 && ind.volume >= ind.volume_sma * 0.65;
+            const regimeText = ind.regime_long ? '多 regime ✓' : (ind.regime_short ? '空 regime ✓' : 'regime 等待');
             
             html += '\u003cdiv style="margin-bottom: 20px; padding: 20px; background: var(--bg-secondary); border-radius: 12px; border: 1px solid var(--border);"\u003e';
             
-            // 头部：币种 + 趋势
             html += '\u003cdiv style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px; padding-bottom: 15px; border-bottom: 1px solid var(--border);"\u003e';
             html += '\u003cdiv style="display: flex; align-items: center; gap: 10px;"\u003e';
             html += '\u003cspan style="font-size: 1.5em; font-weight: 700; color: var(--text-primary);"\u003e' + symbol + '\u003c/span\u003e';
@@ -1381,40 +1496,46 @@ app.get('/', (req, res) => {
             html += '\u003cspan style="padding: 6px 12px; background: ' + trendBg + '; color: ' + trendColor + '; border-radius: 20px; font-weight: 600; font-size: 0.9em;"\u003e' + trendText + '\u003c/span\u003e';
             html += '\u003c/div\u003e';
             
-            // EMA 数值展示
             html += '\u003cdiv style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin: 15px 0;"\u003e';
-            
-            // EMA9
-            const ema9Icon = ind.ema9 > ind.ema21 ? '🟢' : '🔴';
-            html += '\u003cdiv style="padding: 15px; background: var(--bg-card); border-radius: 8px; text-align: center; position: relative; overflow: hidden;"\u003e';
-            html += '\u003cdiv style="font-size: 0.8em; color: var(--text-muted); margin-bottom: 8px; display: flex; align-items: center; justify-content: center; gap: 5px;"\u003e' + ema9Icon + ' EMA9\u003c/div\u003e';
-            html += '\u003cdiv style="font-size: 1.2em; font-weight: 700; color: var(--accent); font-family: monospace;"\u003e$' + (ind.ema9 ? ind.ema9.toFixed(2) : '-') + '\u003c/div\u003e';
-            if (goldenCross) {
-              html += '\u003cdiv style="position: absolute; top: 2px; right: 2px; font-size: 1.2em;"\u003e✨\u003c/div\u003e';
-            }
+            html += '\u003cdiv style="padding: 12px; background: var(--bg-card); border-radius: 8px; text-align: center;"\u003e';
+            html += '\u003cdiv style="font-size: 0.75em; color: var(--text-muted); margin-bottom: 4px;"\u003eEMA20\u003c/div\u003e';
+            html += '\u003cdiv style="font-size: 1.1em; font-weight: 700; color: var(--accent); font-family: monospace;"\u003e$' + (ind.ema_fast ? ind.ema_fast.toFixed(2) : '-') + '\u003c/div\u003e';
+            html += '\u003c/div\u003e';
+            html += '\u003cdiv style="padding: 12px; background: var(--bg-card); border-radius: 8px; text-align: center;"\u003e';
+            html += '\u003cdiv style="font-size: 0.75em; color: var(--text-muted); margin-bottom: 4px;"\u003eEMA50\u003c/div\u003e';
+            html += '\u003cdiv style="font-size: 1.1em; font-weight: 700; color: var(--cyber-blue); font-family: monospace;"\u003e$' + (ind.ema_trend ? ind.ema_trend.toFixed(2) : '-') + '\u003c/div\u003e';
+            html += '\u003c/div\u003e';
+            html += '\u003cdiv style="padding: 12px; background: var(--bg-card); border-radius: 8px; text-align: center;"\u003e';
+            html += '\u003cdiv style="font-size: 0.75em; color: var(--text-muted); margin-bottom: 4px;"\u003eEMA200\u003c/div\u003e';
+            html += '\u003cdiv style="font-size: 1.1em; font-weight: 700; color: var(--cyber-pink); font-family: monospace;"\u003e$' + (ind.ema_long ? ind.ema_long.toFixed(2) : '-') + '\u003c/div\u003e';
+            html += '\u003c/div\u003e';
             html += '\u003c/div\u003e';
             
-            // EMA21
-            html += '\u003cdiv style="padding: 15px; background: var(--bg-card); border-radius: 8px; text-align: center; position: relative;"\u003e';
-            html += '\u003cdiv style="font-size: 0.8em; color: var(--text-muted); margin-bottom: 8px;"\u003eEMA21\u003c/div\u003e';
-            html += '\u003cdiv style="font-size: 1.2em; font-weight: 700; color: var(--cyber-blue); font-family: monospace;"\u003e$' + (ind.ema21 ? ind.ema21.toFixed(2) : '-') + '\u003c/div\u003e';
+            html += '\u003cdiv style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin: 12px 0;"\u003e';
+            html += '\u003cdiv style="padding: 10px; background: var(--bg-card); border-radius: 8px; text-align: center;"\u003e';
+            html += '\u003cdiv style="font-size: 0.7em; color: var(--text-muted);"\u003eRSI(4)\u003c/div\u003e';
+            html += '\u003cdiv style="font-size: 1em; font-weight: 600; font-family: monospace;"\u003e' + (ind.rsi_fast != null ? ind.rsi_fast.toFixed(1) : '-') + '\u003c/div\u003e';
+            html += '\u003c/div\u003e';
+            html += '\u003cdiv style="padding: 10px; background: var(--bg-card); border-radius: 8px; text-align: center;"\u003e';
+            html += '\u003cdiv style="font-size: 0.7em; color: var(--text-muted);"\u003eRSI(14)\u003c/div\u003e';
+            html += '\u003cdiv style="font-size: 1em; font-weight: 600; font-family: monospace;"\u003e' + (ind.rsi_main != null ? ind.rsi_main.toFixed(1) : '-') + '\u003c/div\u003e';
+            html += '\u003c/div\u003e';
+            html += '\u003cdiv style="padding: 10px; background: var(--bg-card); border-radius: 8px; text-align: center;"\u003e';
+            html += '\u003cdiv style="font-size: 0.7em; color: var(--text-muted);"\u003eATR(14)\u003c/div\u003e';
+            html += '\u003cdiv style="font-size: 1em; font-weight: 600; font-family: monospace;"\u003e' + (ind.atr ? ind.atr.toFixed(2) : '-') + '\u003c/div\u003e';
+            html += '\u003c/div\u003e';
+            html += '\u003cdiv style="padding: 10px; background: var(--bg-card); border-radius: 8px; text-align: center;"\u003e';
+            html += '\u003cdiv style="font-size: 0.7em; color: var(--text-muted);"\u003e成交量\u003c/div\u003e';
+            html += '\u003cdiv style="font-size: 0.9em; font-weight: 600;"\u003e' + (volOk ? '✓' : '✗') + '\u003c/div\u003e';
+            html += '\u003c/div\u003e';
             html += '\u003c/div\u003e';
             
-            // EMA55
-            html += '\u003cdiv style="padding: 15px; background: var(--bg-card); border-radius: 8px; text-align: center;"\u003e';
-            html += '\u003cdiv style="font-size: 0.8em; color: var(--text-muted); margin-bottom: 8px;"\u003eEMA55\u003c/div\u003e';
-            html += '\u003cdiv style="font-size: 1.2em; font-weight: 700; color: var(--cyber-pink); font-family: monospace;"\u003e$' + (ind.ema55 ? ind.ema55.toFixed(2) : '-') + '\u003c/div\u003e';
-            html += '\u003c/div\u003e';
-            
-            html += '\u003c/div\u003e';
-            
-            // 信号区域
-            html += signalHtml;
-            
-            // 价格和ATR
-            html += '\u003cdiv style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 15px; padding-top: 15px; border-top: 1px solid var(--border);"\u003e';
-            html += '\u003cdiv style="text-align: center;"\u003e\u003cdiv style="font-size: 0.8em; color: var(--text-muted); margin-bottom: 5px;"\u003e当前价格\u003c/div\u003e\u003cdiv style="font-size: 1.3em; font-weight: 700; color: var(--cyber-blue); font-family: monospace;"\u003e$' + (ind.price ? ind.price.toFixed(2) : '-') + '\u003c/div\u003e\u003c/div\u003e';
-            html += '\u003cdiv style="text-align: center;"\u003e\u003cdiv style="font-size: 0.8em; color: var(--text-muted); margin-bottom: 5px;"\u003eATR(14)\u003c/div\u003e\u003cdiv style="font-size: 1.3em; font-weight: 600; font-family: monospace;"\u003e' + (ind.atr ? ind.atr.toFixed(2) : '-') + '\u003c/div\u003e\u003c/div\u003e';
+            html += '\u003cdiv style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--border);"\u003e';
+            html += '\u003cdiv style="text-align: center;"\u003e\u003cdiv style="font-size: 0.75em; color: var(--text-muted); margin-bottom: 4px;"\u003e价格 / BB\u003c/div\u003e';
+            const bbPos = ind.bb_upper && ind.bb_lower ? (ind.price >= ind.bb_upper ? '上轨' : (ind.price <= ind.bb_lower ? '下轨' : '中轨')) : '-';
+            html += '\u003cdiv style="font-size: 1em; font-weight: 600;"\u003e$' + (ind.price ? ind.price.toFixed(2) : '-') + ' / ' + bbPos + '\u003c/div\u003e\u003c/div\u003e';
+            html += '\u003cdiv style="text-align: center;"\u003e\u003cdiv style="font-size: 0.75em; color: var(--text-muted); margin-bottom: 4px;"\u003eRegime\u003c/div\u003e';
+            html += '\u003cdiv style="font-size: 0.95em; font-weight: 600;"\u003e' + regimeText + '\u003c/div\u003e\u003c/div\u003e';
             html += '\u003c/div\u003e';
             
             html += '\u003c/div\u003e';
