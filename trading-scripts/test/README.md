@@ -24,6 +24,21 @@ python trading-scripts/test/optimize.py --symbol BTC --mode train_test --objecti
 python trading-scripts/test/optimize.py --symbol BTC --mode walk_forward --objective win_rate
 ```
 
+## NFI 独立策略（不与原策略混用）
+
+```bash
+# NFI 专用回测（支持 both / long_only / short_only）
+python trading-scripts/test/backtest_nostalgia_for_infinity.py --symbol BTC --trade-side short_only
+python trading-scripts/test/backtest_nostalgia_for_infinity.py --symbol ETH --trade-side short_only
+
+# NFI 专用 walk-forward 自动选参（默认 short_only）
+python trading-scripts/test/optimize_nostalgia_for_infinity.py --symbol BTC
+python trading-scripts/test/optimize_nostalgia_for_infinity.py --symbol ETH --objective return
+
+# NFI 单次全样本扫描
+python trading-scripts/test/optimize_nostalgia_for_infinity.py --mode single --symbol BTC
+```
+
 ## 依赖
 
 - Python 3.7+
