@@ -71,6 +71,18 @@ const NFI_EMA_FAST = 20, NFI_EMA_TREND = 50, NFI_EMA_LONG = 200;
 const NFI_RSI_FAST = 4, NFI_RSI_MAIN = 14;
 const NFI_ATR_PERIOD = 14, NFI_BB_PERIOD = 20, NFI_BB_STDDEV = 2.0;
 const NFI_VOLUME_SMA = 30;
+const NFI_TRADE_SIDE = 'short_only';  // both / long_only / short_only
+
+const NFI_DEFAULTS = {
+  rsi_fast_buy: 23, rsi_main_buy: 36,
+  rsi_fast_sell: 79, rsi_main_sell: 62,
+  bb_touch_buffer: 1.01, ema_pullback_buffer: 0.985,
+  bb_reject_buffer: 0.99, ema_bounce_buffer: 1.015,
+  regime_price_floor: 0.95, regime_price_ceiling: 1.05,
+  max_breakdown_pct: 0.10, max_breakout_pct: 0.10,
+  min_volume_ratio: 0.65
+};
+const NFI_ETH_OVERRIDES = { rsi_fast_sell: 75, rsi_main_sell: 62 };
 
 function nfiEma(values, period) {
   if (!values.length) return [];
@@ -196,6 +208,28 @@ async function computeNfiIndicators(symbol) {
 
   const i = closes.length - 1;
   const price = closes[i];
+  const prevClose = closes[i - 1];
+  const prevRsiFast = rsiFast[i - 1];
+
+  const params = { ...NFI_DEFAULTS, ...(symbol === 'ETH' ? NFI_ETH_OVERRIDES : {}) };
+
+  const regimeLong = emaTrend[i] > emaLong[i] && price > emaLong[i] * params.regime_price_floor;
+  const regimeShort = emaTrend[i] < emaLong[i] && price < emaLong[i] * params.regime_price_ceiling;
+  const pullbackLong = price <= bb.lower[i] * params.bb_touch_buffer || price <= emaFast[i] * params.ema_pullback_buffer;
+  const pullbackShort = price >= bb.upper[i] * params.bb_reject_buffer || price >= emaFast[i] * params.ema_bounce_buffer;
+  const rsiLong = rsiFast[i] <= params.rsi_fast_buy && rsiMain[i] <= params.rsi_main_buy;
+  const rsiShort = rsiFast[i] >= params.rsi_fast_sell && rsiMain[i] >= params.rsi_main_sell;
+  const volumeOk = volumeSma[i] > 0 && volumes[i] >= volumeSma[i] * params.min_volume_ratio;
+  const notBreakdown = price >= emaLong[i] * (1 - params.max_breakdown_pct);
+  const notBreakout = price <= emaLong[i] * (1 + params.max_breakout_pct);
+  const stabilizingLong = price >= prevClose || rsiFast[i] > prevRsiFast;
+  const stabilizingShort = price <= prevClose || rsiFast[i] < prevRsiFast;
+
+  const allowLong = ['both', 'long_only', 'long'].includes(NFI_TRADE_SIDE);
+  const allowShort = ['both', 'short_only', 'short'].includes(NFI_TRADE_SIDE);
+  const longOk = allowLong && regimeLong && pullbackLong && rsiLong && volumeOk && notBreakdown && stabilizingLong;
+  const shortOk = allowShort && regimeShort && pullbackShort && rsiShort && volumeOk && notBreakout && stabilizingShort;
+
   return {
     price,
     ema_fast: emaFast[i],
@@ -211,8 +245,19 @@ async function computeNfiIndicators(symbol) {
     volume_sma: volumeSma[i],
     trend_up: emaTrend[i] > emaLong[i],
     trend_down: emaTrend[i] < emaLong[i],
-    regime_long: emaTrend[i] > emaLong[i] && price > emaLong[i] * 0.95,
-    regime_short: emaTrend[i] < emaLong[i] && price < emaLong[i] * 1.05
+    regime_long: regimeLong,
+    regime_short: regimeShort,
+    conditions: {
+      regime_short: regimeShort,
+      pullback_short: pullbackShort,
+      rsi_short: rsiShort,
+      volume_ok: volumeOk,
+      not_breakout: notBreakout,
+      stabilizing_short: stabilizingShort,
+      short_ok: shortOk,
+      long_ok: longOk
+    },
+    params: { rsi_fast_sell: params.rsi_fast_sell, rsi_main_sell: params.rsi_main_sell }
   };
 }
 
@@ -1338,6 +1383,9 @@ app.get('/', (req, res) => {
         <h3 style="color: var(--accent);">📈 NFI 技术指标 (1小时)</h3>
         <span class="live-badge">● LIVE</span>
       </div>
+      <div style="font-size: 0.75em; color: var(--text-muted); margin-bottom: 10px; padding: 0 4px;">
+        字段：EMA20/50/200 均线 | RSI(4)/(14) 超买超卖 | ATR 波动率 | 成交量≥65%均量 | 价格/BB 布林带位置 | Regime 趋势 regime。做空需 6 项条件全 ✓。
+      </div>
       <div id="indicators-content">
         <div class="loading">加载中...</div>
       </div>
@@ -1483,17 +1531,24 @@ app.get('/', (req, res) => {
               trendBg = 'rgba(255, 0, 128, 0.1)';
             }
             
-            const volOk = ind.volume_sma > 0 && ind.volume >= ind.volume_sma * 0.65;
-            const regimeText = ind.regime_long ? '多 regime ✓' : (ind.regime_short ? '空 regime ✓' : 'regime 等待');
+            const c = ind.conditions || {};
+            const shortOk = c.short_ok;
+            const rsiSell = ind.params ? ind.params.rsi_fast_sell : 79;
+            const rsiMainSell = ind.params ? ind.params.rsi_main_sell : 62;
             
             html += '\u003cdiv style="margin-bottom: 20px; padding: 20px; background: var(--bg-secondary); border-radius: 12px; border: 1px solid var(--border);"\u003e';
             
-            html += '\u003cdiv style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px; padding-bottom: 15px; border-bottom: 1px solid var(--border);"\u003e';
+            html += '\u003cdiv style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px; padding-bottom: 15px; border-bottom: 1px solid var(--border); flex-wrap: wrap; gap: 8px;"\u003e';
             html += '\u003cdiv style="display: flex; align-items: center; gap: 10px;"\u003e';
             html += '\u003cspan style="font-size: 1.5em; font-weight: 700; color: var(--text-primary);"\u003e' + symbol + '\u003c/span\u003e';
             html += '\u003cspan style="font-size: 1.2em;"\u003e' + trendIcon + '\u003c/span\u003e';
             html += '\u003c/div\u003e';
             html += '\u003cspan style="padding: 6px 12px; background: ' + trendBg + '; color: ' + trendColor + '; border-radius: 20px; font-weight: 600; font-size: 0.9em;"\u003e' + trendText + '\u003c/span\u003e';
+            if (shortOk) {
+              html += '\u003cspan style="padding: 6px 14px; background: linear-gradient(135deg, rgba(255,0,128,0.2), rgba(255,0,128,0.05)); border: 2px solid var(--cyber-pink); border-radius: 20px; font-weight: 700; font-size: 0.95em; color: var(--cyber-pink);"\u003e🎯 可做空\u003c/span\u003e';
+            } else {
+              html += '\u003cspan style="padding: 6px 12px; background: rgba(110,118,129,0.15); color: var(--text-muted); border-radius: 20px; font-weight: 600; font-size: 0.9em;"\u003e⏳ 等待中\u003c/span\u003e';
+            }
             html += '\u003c/div\u003e';
             
             html += '\u003cdiv style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin: 15px 0;"\u003e';
@@ -1513,20 +1568,32 @@ app.get('/', (req, res) => {
             
             html += '\u003cdiv style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin: 12px 0;"\u003e';
             html += '\u003cdiv style="padding: 10px; background: var(--bg-card); border-radius: 8px; text-align: center;"\u003e';
-            html += '\u003cdiv style="font-size: 0.7em; color: var(--text-muted);"\u003eRSI(4)\u003c/div\u003e';
-            html += '\u003cdiv style="font-size: 1em; font-weight: 600; font-family: monospace;"\u003e' + (ind.rsi_fast != null ? ind.rsi_fast.toFixed(1) : '-') + '\u003c/div\u003e';
+            html += '\u003cdiv style="font-size: 0.7em; color: var(--text-muted);"\u003eRSI(4)≥' + rsiSell + '\u003c/div\u003e';
+            html += '\u003cdiv style="font-size: 1em; font-weight: 600; font-family: monospace;"\u003e' + (ind.rsi_fast != null ? ind.rsi_fast.toFixed(1) : '-') + (c.rsi_short ? ' ✓' : ' ✗') + '\u003c/div\u003e';
             html += '\u003c/div\u003e';
             html += '\u003cdiv style="padding: 10px; background: var(--bg-card); border-radius: 8px; text-align: center;"\u003e';
-            html += '\u003cdiv style="font-size: 0.7em; color: var(--text-muted);"\u003eRSI(14)\u003c/div\u003e';
-            html += '\u003cdiv style="font-size: 1em; font-weight: 600; font-family: monospace;"\u003e' + (ind.rsi_main != null ? ind.rsi_main.toFixed(1) : '-') + '\u003c/div\u003e';
+            html += '\u003cdiv style="font-size: 0.7em; color: var(--text-muted);"\u003eRSI(14)≥' + rsiMainSell + '\u003c/div\u003e';
+            html += '\u003cdiv style="font-size: 1em; font-weight: 600; font-family: monospace;"\u003e' + (ind.rsi_main != null ? ind.rsi_main.toFixed(1) : '-') + (c.rsi_short ? ' ✓' : ' ✗') + '\u003c/div\u003e';
             html += '\u003c/div\u003e';
             html += '\u003cdiv style="padding: 10px; background: var(--bg-card); border-radius: 8px; text-align: center;"\u003e';
             html += '\u003cdiv style="font-size: 0.7em; color: var(--text-muted);"\u003eATR(14)\u003c/div\u003e';
             html += '\u003cdiv style="font-size: 1em; font-weight: 600; font-family: monospace;"\u003e' + (ind.atr ? ind.atr.toFixed(2) : '-') + '\u003c/div\u003e';
             html += '\u003c/div\u003e';
             html += '\u003cdiv style="padding: 10px; background: var(--bg-card); border-radius: 8px; text-align: center;"\u003e';
-            html += '\u003cdiv style="font-size: 0.7em; color: var(--text-muted);"\u003e成交量\u003c/div\u003e';
-            html += '\u003cdiv style="font-size: 0.9em; font-weight: 600;"\u003e' + (volOk ? '✓' : '✗') + '\u003c/div\u003e';
+            html += '\u003cdiv style="font-size: 0.7em; color: var(--text-muted);"\u003e成交量≥65%\u003c/div\u003e';
+            html += '\u003cdiv style="font-size: 0.9em; font-weight: 600;"\u003e' + (c.volume_ok ? '✓' : '✗') + '\u003c/div\u003e';
+            html += '\u003c/div\u003e';
+            html += '\u003c/div\u003e';
+            
+            html += '\u003cdiv style="margin: 12px 0; padding: 10px 12px; background: var(--bg-card); border-radius: 8px; font-size: 0.8em;"\u003e';
+            html += '\u003cdiv style="color: var(--text-muted); margin-bottom: 6px; font-weight: 600;"\u003e做空条件 (short_only)\u003c/div\u003e';
+            html += '\u003cdiv style="display: flex; flex-wrap: wrap; gap: 8px 12px;"\u003e';
+            html += '\u003cspan title="EMA50小于EMA200 且 价格小于EMA200×1.05"\u003eRegime ' + (c.regime_short ? '✓' : '✗') + '\u003c/span\u003e';
+            html += '\u003cspan title="价格≥BB上轨×0.99 或 价格≥EMA20×1.015"\u003ePullback ' + (c.pullback_short ? '✓' : '✗') + '\u003c/span\u003e';
+            html += '\u003cspan title="RSI(4)≥' + rsiSell + ' 且 RSI(14)≥' + rsiMainSell + '"\u003eRSI ' + (c.rsi_short ? '✓' : '✗') + '\u003c/span\u003e';
+            html += '\u003cspan title="成交量≥均量×65%"\u003eVolume ' + (c.volume_ok ? '✓' : '✗') + '\u003c/span\u003e';
+            html += '\u003cspan title="价格≤EMA200×1.10 未突破"\u003eNoBreakout ' + (c.not_breakout ? '✓' : '✗') + '\u003c/span\u003e';
+            html += '\u003cspan title="收盘≤前收 或 RSI(4)下降 确认回落"\u003eStabilizing ' + (c.stabilizing_short ? '✓' : '✗') + '\u003c/span\u003e';
             html += '\u003c/div\u003e';
             html += '\u003c/div\u003e';
             
@@ -1535,6 +1602,7 @@ app.get('/', (req, res) => {
             const bbPos = ind.bb_upper && ind.bb_lower ? (ind.price >= ind.bb_upper ? '上轨' : (ind.price <= ind.bb_lower ? '下轨' : '中轨')) : '-';
             html += '\u003cdiv style="font-size: 1em; font-weight: 600;"\u003e$' + (ind.price ? ind.price.toFixed(2) : '-') + ' / ' + bbPos + '\u003c/div\u003e\u003c/div\u003e';
             html += '\u003cdiv style="text-align: center;"\u003e\u003cdiv style="font-size: 0.75em; color: var(--text-muted); margin-bottom: 4px;"\u003eRegime\u003c/div\u003e';
+            const regimeText = ind.regime_long ? '多 ✓' : (ind.regime_short ? '空 ✓' : '等待');
             html += '\u003cdiv style="font-size: 0.95em; font-weight: 600;"\u003e' + regimeText + '\u003c/div\u003e\u003c/div\u003e';
             html += '\u003c/div\u003e';
             
