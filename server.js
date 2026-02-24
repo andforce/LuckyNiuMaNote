@@ -156,21 +156,67 @@ app.get('/api/chart/:symbol', async (req, res) => {
     const ema21 = ema(closes, 21);
     const ema55 = ema(closes, 55);
     
-    // 添加EMA到K线
+    // 计算ATR（用于波动率过滤）
+    const atr = (highs, lows, closes, period) => {
+      const tr = [];
+      for (let i = 1; i < closes.length; i++) {
+        tr.push(Math.max(
+          highs[i] - lows[i],
+          Math.abs(highs[i] - closes[i - 1]),
+          Math.abs(lows[i] - closes[i - 1])
+        ));
+      }
+      const atrArr = [0];
+      for (let i = 1; i < closes.length; i++) {
+        const start = Math.max(0, i - period);
+        const slice = tr.slice(start, i);
+        atrArr.push(slice.length ? slice.reduce((a, b) => a + b, 0) / slice.length : 0);
+      }
+      return atrArr;
+    };
+    const highs = klines.map(k => k.high);
+    const lows = klines.map(k => k.low);
+    const atr14 = atr(highs, lows, closes, 14);
+    
+    // 添加EMA和ATR到K线
     klines.forEach((k, i) => {
       k.ema9 = ema9[i];
       k.ema21 = ema21[i];
       k.ema55 = ema55[i];
+      k.atr = atr14[i];
     });
     
-    // 检测金叉死叉
+    // 严格按 auto_trader.py 规则：EMA排列 + 金叉/死叉 + fee_check（净利润>=0.5%）
+    const TAKER_FEE = 0.00035;
+    const MIN_PROFIT_AFTER_FEE = 0.005;
+    const DEFAULT_POSITION_USD = 100;  // 用于 fee_check 的假设仓位
+    
+    const checkProfitAfterFees = (entryPrice, takeProfit, atrVal) => {
+      const priceChangePct = Math.abs(takeProfit - entryPrice) / entryPrice;
+      const grossProfit = DEFAULT_POSITION_USD * priceChangePct;
+      const openFee = DEFAULT_POSITION_USD * TAKER_FEE;
+      const closePositionValue = DEFAULT_POSITION_USD * (1 + priceChangePct);
+      const closeFee = closePositionValue * TAKER_FEE;
+      const totalFees = openFee + closeFee;
+      const netProfit = grossProfit - totalFees;
+      const netProfitPct = netProfit / DEFAULT_POSITION_USD;
+      return netProfitPct >= MIN_PROFIT_AFTER_FEE;
+    };
+    
     const signals = [];
     for (let i = 1; i < klines.length; i++) {
-      const prev = klines[i-1];
+      const prev = klines[i - 1];
       const curr = klines[i];
       
-      if (prev.ema9 && prev.ema21 && curr.ema9 && curr.ema21) {
-        if (prev.ema9 <= prev.ema21 && curr.ema9 > curr.ema21) {
+      if (!prev.ema9 || !prev.ema21 || !curr.ema9 || !curr.ema21 || !curr.ema55 || !curr.atr) continue;
+      
+      // 做多：trend_up + golden_cross + fee_check（与 auto_trader.py 完全一致）
+      if (prev.ema9 <= prev.ema21 && curr.ema9 > curr.ema21) {
+        const trendUp = curr.ema9 > curr.ema21 && curr.ema21 > curr.ema55;
+        const stopLoss = curr.close - 2 * curr.atr;
+        const takeProfit = curr.close + 3 * curr.atr;
+        const feeValid = checkProfitAfterFees(curr.close, takeProfit, curr.atr);
+        if (trendUp && feeValid) {
           signals.push({
             type: 'golden_cross',
             timestamp: curr.timestamp,
@@ -178,7 +224,15 @@ app.get('/api/chart/:symbol', async (req, res) => {
             index: i,
             label: '金叉买入'
           });
-        } else if (prev.ema9 >= prev.ema21 && curr.ema9 < curr.ema21) {
+        }
+      }
+      // 做空：trend_down + death_cross + fee_check（与 auto_trader.py 完全一致）
+      else if (prev.ema9 >= prev.ema21 && curr.ema9 < curr.ema21) {
+        const trendDown = curr.ema9 < curr.ema21 && curr.ema21 < curr.ema55;
+        const stopLoss = curr.close + 2 * curr.atr;
+        const takeProfit = curr.close - 3 * curr.atr;
+        const feeValid = checkProfitAfterFees(curr.close, takeProfit, curr.atr);
+        if (trendDown && feeValid) {
           signals.push({
             type: 'death_cross',
             timestamp: curr.timestamp,
@@ -1390,7 +1444,7 @@ app.get('/chart', (req, res) => {
   const content = `
     <header>
       <h1>📊 1分钟K线图表 + EMA</h1>
-      <p class="subtitle">与自动交易60秒检查同步，实时K线图与EMA技术指标分析</p>
+      <p class="subtitle">严格按 auto_trader 规则：EMA排列 + 金叉/死叉 + 手续费后净利≥0.5%</p>
       <div style="margin-top: 15px; display: flex; justify-content: center; gap: 15px;">
         <a href="/" style="font-size: 0.85em;">← 返回首页</a>
         <a href="/strategy" style="font-size: 0.85em;">🎯 交易策略</a>
@@ -1398,23 +1452,33 @@ app.get('/chart', (req, res) => {
     </header>
     
     <div style="margin: 20px 0; display: flex; flex-wrap: wrap; justify-content: center; align-items: center; gap: 10px;">
-      <span style="color: var(--text-muted); margin-right: 5px;">币种:</span>
-      <button onclick="loadChart1m('BTC')" id="btn-btc-1m" style="padding: 8px 16px; margin: 0 2px; background: var(--accent); color: var(--bg-primary); border: none; border-radius: 4px; cursor: pointer; font-weight: 600;">BTC</button>
-      <button onclick="loadChart1m('ETH')" id="btn-eth-1m" style="padding: 8px 16px; margin: 0 2px; background: var(--bg-card); color: var(--text-primary); border: 1px solid var(--border); border-radius: 4px; cursor: pointer;">ETH</button>
-      <span style="color: var(--text-muted); margin: 0 10px 0 15px;">时间范围:</span>
+      <span style="color: var(--text-muted); margin-right: 5px;">时间范围:</span>
       <button onclick="setRange1m(10)" id="btn-range-10m" style="padding: 8px 14px; margin: 0 2px; background: var(--bg-card); color: var(--text-primary); border: 1px solid var(--border); border-radius: 4px; cursor: pointer;">10分钟</button>
       <button onclick="setRange1m(30)" id="btn-range-30m" style="padding: 8px 14px; margin: 0 2px; background: var(--bg-card); color: var(--text-primary); border: 1px solid var(--border); border-radius: 4px; cursor: pointer;">30分钟</button>
-      <button onclick="setRange1m(60)" id="btn-range-60m" style="padding: 8px 14px; margin: 0 2px; background: var(--bg-card); color: var(--text-primary); border: 1px solid var(--border); border-radius: 4px; cursor: pointer;">1小时</button>
-      <button onclick="setRange1m(1440)" id="btn-range-24h" style="padding: 8px 14px; margin: 0 2px; background: var(--accent); color: var(--bg-primary); border: none; border-radius: 4px; cursor: pointer; font-weight: 600;">24小时</button>
+      <button onclick="setRange1m(60)" id="btn-range-60m" style="padding: 8px 14px; margin: 0 2px; background: var(--accent); color: var(--bg-primary); border: none; border-radius: 4px; cursor: pointer; font-weight: 600;">1小时</button>
+      <button onclick="setRange1m(1440)" id="btn-range-24h" style="padding: 8px 14px; margin: 0 2px; background: var(--bg-card); color: var(--text-primary); border: 1px solid var(--border); border-radius: 4px; cursor: pointer;">24小时</button>
     </div>
     
-    <div id="chart-container-1m" style="background: var(--bg-card); padding: 20px; border-radius: 8px; border: 1px solid var(--border); min-height: 400px;">
-      <div style="text-align: center; padding: 50px; color: var(--text-muted);">
-        正在加载1分钟图表数据...
+    <style>@media (max-width: 900px) { .chart-grid { grid-template-columns: 1fr !important; } }</style>
+    <div class="chart-grid" style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-top: 20px;">
+      <div>
+        <h3 style="margin-bottom: 10px; color: var(--accent);">BTC</h3>
+        <div id="chart-container-btc" style="background: var(--bg-card); padding: 20px; border-radius: 8px; border: 1px solid var(--border); min-height: 350px;">
+          <div style="text-align: center; padding: 50px; color: var(--text-muted);">加载中...</div>
+        </div>
+        <div id="signals-container-btc" style="margin-top: 15px;"></div>
+      </div>
+      <div>
+        <h3 style="margin-bottom: 10px; color: var(--accent);">ETH</h3>
+        <div id="chart-container-eth" style="background: var(--bg-card); padding: 20px; border-radius: 8px; border: 1px solid var(--border); min-height: 350px;">
+          <div style="text-align: center; padding: 50px; color: var(--text-muted);">加载中...</div>
+        </div>
+        <div id="signals-container-eth" style="margin-top: 15px;"></div>
       </div>
     </div>
-    
-    <div id="signals-container-1m" style="margin-top: 20px;"></div>
+    <div style="margin-top: 15px; padding: 12px 16px; background: var(--bg-card); border-radius: 6px; border: 1px solid var(--border); font-size: 0.85em; color: var(--text-muted);">
+      <strong style="color: var(--text-primary);">📋 规则（与 auto_trader.py 一致）：</strong> 做多=多头排列+金叉+净利≥0.5%；做空=空头排列+死叉+净利≥0.5%。止损2×ATR，止盈3×ATR。
+    </div>
     
     <!-- 引入 Chart.js -->
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
@@ -1424,12 +1488,12 @@ app.get('/chart', (req, res) => {
         const container = document.getElementById(containerId);
         
         if (!signals || signals.length === 0) {
-          container.innerHTML = '<div style="text-align: center; padding: 20px; color: var(--text-muted);">' + (emptyText || '无金叉/死叉信号') + '</div>';
+          container.innerHTML = '<div style="text-align: center; padding: 20px; color: var(--text-muted);">' + (emptyText || '当前时段无可交易信号') + '</div>';
           return;
         }
         
         let html = '<div style="background: var(--bg-card); padding: 20px; border-radius: 8px; border: 1px solid var(--border);">';
-        html += '<h3 style="margin-bottom: 15px; color: var(--accent);">📍 近期交易信号 (' + signals.length + '个)</h3>';
+        html += '<h3 style="margin-bottom: 15px; color: var(--accent);">✅ 可交易信号 (' + signals.length + '个)</h3>';
         html += '<div style="display: grid; gap: 10px;">';
         
         signals.slice(-10).reverse().forEach(s => {
@@ -1453,15 +1517,15 @@ app.get('/chart', (req, res) => {
         container.innerHTML = html;
       }
       
-      let currentChart1m = null;
-      let currentSymbol1m = 'BTC';
-      let currentMinutes1m = 1440;
+      let currentChartBtc = null;
+      let currentChartEth = null;
+      let currentMinutes1m = 60;
       
       const rangeLabels = { 10: '10分钟', 30: '30分钟', 60: '1小时', 1440: '24小时' };
       
       function setRange1m(minutes) {
         currentMinutes1m = minutes;
-        ['btn-range-10m', 'btn-range-30m', 'btn-range-60m', 'btn-range-24h'].forEach((id, i) => {
+        ['btn-range-10m', 'btn-range-30m', 'btn-range-60m', 'btn-range-24h'].forEach((id) => {
           const btn = document.getElementById(id);
           const isActive = (id === 'btn-range-10m' && minutes === 10) || (id === 'btn-range-30m' && minutes === 30) || (id === 'btn-range-60m' && minutes === 60) || (id === 'btn-range-24h' && minutes === 1440);
           btn.style.background = isActive ? 'var(--accent)' : 'var(--bg-card)';
@@ -1469,45 +1533,48 @@ app.get('/chart', (req, res) => {
           btn.style.border = isActive ? 'none' : '1px solid var(--border)';
           btn.style.fontWeight = isActive ? '600' : 'normal';
         });
-        loadChart1m(currentSymbol1m);
+        loadAllCharts();
       }
       
-      async function loadChart1m(symbol) {
-        currentSymbol1m = symbol;
-        
-        document.getElementById('btn-btc-1m').style.background = symbol === 'BTC' ? 'var(--accent)' : 'var(--bg-card)';
-        document.getElementById('btn-btc-1m').style.color = symbol === 'BTC' ? 'var(--bg-primary)' : 'var(--text-primary)';
-        document.getElementById('btn-eth-1m').style.background = symbol === 'ETH' ? 'var(--accent)' : 'var(--bg-card)';
-        document.getElementById('btn-eth-1m').style.color = symbol === 'ETH' ? 'var(--bg-primary)' : 'var(--text-primary)';
-        
+      async function loadChartForSymbol(symbol) {
+        const chartContainerId = 'chart-container-' + symbol.toLowerCase();
+        const signalsContainerId = 'signals-container-' + symbol.toLowerCase();
         const rangeText = rangeLabels[currentMinutes1m] || currentMinutes1m + '分钟';
-        document.getElementById('chart-container-1m').innerHTML = '<div style="text-align: center; padding: 50px; color: var(--text-muted);">正在加载 ' + symbol + ' 近' + rangeText + ' 1分钟数据...</div>';
+        
+        document.getElementById(chartContainerId).innerHTML = '<div style="text-align: center; padding: 50px; color: var(--text-muted);">正在加载 ' + symbol + '...</div>';
         
         try {
           const res = await fetch('/api/chart/' + symbol + '?interval=1m&minutes=' + currentMinutes1m);
           const data = await res.json();
           
           if (!data.success) {
-            document.getElementById('chart-container-1m').innerHTML = '<div style="text-align: center; padding: 50px; color: var(--cyber-pink);">加载失败: ' + (data.error || '未知错误') + '</div>';
+            document.getElementById(chartContainerId).innerHTML = '<div style="text-align: center; padding: 50px; color: var(--cyber-pink);">加载失败: ' + (data.error || '未知错误') + '</div>';
             return;
           }
           
-          renderChart1m(data, currentMinutes1m);
-          const emptyText = '近' + rangeText + '无金叉/死叉信号';
-          renderSignals(data.signals, 'signals-container-1m', emptyText);
+          renderChart1m(data, symbol);
+          const emptyText = '近' + rangeText + '无可交易信号';
+          renderSignals(data.signals, signalsContainerId, emptyText);
           
         } catch (err) {
-          console.error('加载1分钟图表失败:', err);
-          document.getElementById('chart-container-1m').innerHTML = '<div style="text-align: center; padding: 50px; color: var(--cyber-pink);">加载失败，请刷新重试</div>';
+          console.error('加载' + symbol + '图表失败:', err);
+          document.getElementById(chartContainerId).innerHTML = '<div style="text-align: center; padding: 50px; color: var(--cyber-pink);">加载失败</div>';
         }
       }
       
-      function renderChart1m(data, minutes) {
-        const container = document.getElementById('chart-container-1m');
-        const rangeText = rangeLabels[minutes || currentMinutes1m] || (minutes || 1440) + '分钟';
-        container.innerHTML = '<canvas id="klineChart1m"></canvas>';
+      function loadAllCharts() {
+        loadChartForSymbol('BTC');
+        loadChartForSymbol('ETH');
+      }
+      
+      function renderChart1m(data, symbol) {
+        const chartContainerId = 'chart-container-' + symbol.toLowerCase();
+        const container = document.getElementById(chartContainerId);
+        const canvasId = 'klineChart-' + symbol.toLowerCase();
+        const rangeText = rangeLabels[currentMinutes1m] || '1小时';
+        container.innerHTML = '<canvas id="' + canvasId + '"></canvas>';
         
-        const ctx = document.getElementById('klineChart1m').getContext('2d');
+        const ctx = document.getElementById(canvasId).getContext('2d');
         
         const labels = data.klines.map(k => new Date(k.timestamp));
         const prices = data.klines.map(k => k.close);
@@ -1523,139 +1590,49 @@ app.get('/chart', (req, res) => {
           .filter(s => s.type === 'death_cross')
           .map(s => ({ x: new Date(s.timestamp), y: s.price }));
         
-        if (currentChart1m) {
-          currentChart1m.destroy();
-        }
-        
-        currentChart1m = new Chart(ctx, {
+        const chartRef = symbol === 'BTC' ? currentChartBtc : currentChartEth;
+        if (chartRef) chartRef.destroy();
+        const newChart = new Chart(ctx, {
           type: 'line',
           data: {
             labels: labels,
             datasets: [
-              {
-                label: '价格',
-                data: prices,
-                borderColor: '#00d4ff',
-                backgroundColor: 'rgba(0, 212, 255, 0.1)',
-                borderWidth: 2,
-                pointRadius: 0,
-                pointHoverRadius: 4,
-                tension: 0.1
-              },
-              {
-                label: 'EMA9',
-                data: ema9,
-                borderColor: '#00ff9f',
-                borderWidth: 2,
-                pointRadius: 0,
-                pointHoverRadius: 3,
-                tension: 0.3
-              },
-              {
-                label: 'EMA21',
-                data: ema21,
-                borderColor: '#bf00ff',
-                borderWidth: 2,
-                pointRadius: 0,
-                pointHoverRadius: 3,
-                tension: 0.3
-              },
-              {
-                label: 'EMA55',
-                data: ema55,
-                borderColor: '#ff0080',
-                borderWidth: 2,
-                pointRadius: 0,
-                pointHoverRadius: 3,
-                tension: 0.3,
-                borderDash: [5, 5]
-              },
-              {
-                label: '金叉',
-                data: goldenCrossPoints,
-                backgroundColor: '#00ff9f',
-                borderColor: '#00ff9f',
-                pointStyle: 'triangle',
-                pointRadius: 10,
-                pointHoverRadius: 12,
-                showLine: false
-              },
-              {
-                label: '死叉',
-                data: deathCrossPoints,
-                backgroundColor: '#ff0080',
-                borderColor: '#ff0080',
-                pointStyle: 'triangle',
-                pointRadius: 10,
-                pointHoverRadius: 12,
-                rotation: 180,
-                showLine: false
-              }
+              { label: '价格', data: prices, borderColor: '#00d4ff', backgroundColor: 'rgba(0, 212, 255, 0.1)', borderWidth: 2, pointRadius: 0, pointHoverRadius: 4, tension: 0.1 },
+              { label: 'EMA9', data: ema9, borderColor: '#00ff9f', borderWidth: 2, pointRadius: 0, pointHoverRadius: 3, tension: 0.3 },
+              { label: 'EMA21', data: ema21, borderColor: '#bf00ff', borderWidth: 2, pointRadius: 0, pointHoverRadius: 3, tension: 0.3 },
+              { label: 'EMA55', data: ema55, borderColor: '#ff0080', borderWidth: 2, pointRadius: 0, pointHoverRadius: 3, tension: 0.3, borderDash: [5, 5] },
+              { label: '金叉', data: goldenCrossPoints, backgroundColor: '#00ff9f', borderColor: '#00ff9f', pointStyle: 'triangle', pointRadius: 10, pointHoverRadius: 12, showLine: false },
+              { label: '死叉', data: deathCrossPoints, backgroundColor: '#ff0080', borderColor: '#ff0080', pointStyle: 'triangle', pointRadius: 10, pointHoverRadius: 12, rotation: 180, showLine: false }
             ]
           },
           options: {
             responsive: true,
             maintainAspectRatio: false,
             height: 500,
-            interaction: {
-              mode: 'index',
-              intersect: false
-            },
+            interaction: { mode: 'index', intersect: false },
             plugins: {
-              title: {
-                display: true,
-                text: data.symbol + '/USD 1分钟K线 + EMA（近' + rangeText + '）',
-                color: '#e6edf3',
-                font: { size: 16 }
-              },
-              legend: {
-                labels: { color: '#8b949e' }
-              },
+              title: { display: true, text: data.symbol + '/USD 1分钟K线 + EMA（近' + rangeText + '）', color: '#e6edf3', font: { size: 16 } },
+              legend: { labels: { color: '#8b949e' } },
               tooltip: {
                 backgroundColor: 'rgba(22, 27, 34, 0.95)',
                 titleColor: '#e6edf3',
                 bodyColor: '#8b949e',
                 borderColor: '#30363d',
                 borderWidth: 1,
-                callbacks: {
-                  label: function(context) {
-                    let label = context.dataset.label || '';
-                    if (label) label += ': ';
-                    if (context.parsed.y !== null) label += '$' + context.parsed.y.toFixed(2);
-                    return label;
-                  }
-                }
+                callbacks: { label: function(context) { let l = context.dataset.label || ''; if (l) l += ': '; if (context.parsed.y !== null) l += '$' + context.parsed.y.toFixed(2); return l; } }
               }
             },
             scales: {
-              x: {
-                type: 'time',
-                time: {
-                  displayFormats: {
-                    minute: 'HH:mm',
-                    hour: 'HH:mm',
-                    day: 'MM-dd'
-                  }
-                },
-                ticks: { color: '#6e7681' },
-                grid: { color: '#30363d' }
-              },
-              y: {
-                ticks: { 
-                  color: '#6e7681',
-                  callback: function(value) {
-                    return '$' + value.toLocaleString();
-                  }
-                },
-                grid: { color: '#30363d' }
-              }
+              x: { type: 'time', time: { displayFormats: { minute: 'HH:mm', hour: 'HH:mm', day: 'MM-dd' } }, ticks: { color: '#6e7681' }, grid: { color: '#30363d' } },
+              y: { ticks: { color: '#6e7681', callback: function(v) { return '$' + v.toLocaleString(); } }, grid: { color: '#30363d' } }
             }
           }
         });
+        if (symbol === 'BTC') currentChartBtc = newChart; else currentChartEth = newChart;
       }
       
       // 初始加载
-      loadChart1m('BTC');
+      loadAllCharts();
     </script>
   `;
   
