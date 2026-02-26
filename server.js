@@ -248,8 +248,11 @@ async function computeNfiIndicators(symbol) {
     regime_long: regimeLong,
     regime_short: regimeShort,
     conditions: {
+      regime_long: regimeLong,
       regime_short: regimeShort,
+      pullback_long: pullbackLong,
       pullback_short: pullbackShort,
+      rsi_long: rsiLong,
       rsi_short: rsiShort,
       volume_ok: volumeOk,
       not_breakout: notBreakout,
@@ -1384,7 +1387,7 @@ app.get('/', (req, res) => {
         <span class="live-badge">● LIVE</span>
       </div>
       <div style="font-size: 0.75em; color: var(--text-muted); margin-bottom: 10px; padding: 0 4px;">
-        字段：EMA20/50/200 均线 | RSI(4)/(14) 超买超卖 | ATR 波动率 | 成交量≥65%均量 | 价格/BB 布林带位置 | Regime 趋势 regime。做空需 6 项条件全 ✓。
+        字段：EMA20/50/200 均线 | RSI 超买超卖 | ATR 波动率 | 成交量≥65%均量。BTC short_only 只做空；ETH both 多空都做。
       </div>
       <div id="indicators-content">
         <div class="loading">加载中...</div>
@@ -1532,9 +1535,13 @@ app.get('/', (req, res) => {
             }
             
             const c = ind.conditions || {};
+            const isEth = symbol === 'ETH';
+            const longOk = c.long_ok;
             const shortOk = c.short_ok;
             const rsiSell = ind.params ? ind.params.rsi_fast_sell : 79;
             const rsiMainSell = ind.params ? ind.params.rsi_main_sell : 62;
+            const rsiBuyFast = isEth ? 21 : 23;
+            const rsiBuyMain = isEth ? 34 : 36;
             
             html += '\u003cdiv style="margin-bottom: 20px; padding: 20px; background: var(--bg-secondary); border-radius: 12px; border: 1px solid var(--border);"\u003e';
             
@@ -1544,10 +1551,22 @@ app.get('/', (req, res) => {
             html += '\u003cspan style="font-size: 1.2em;"\u003e' + trendIcon + '\u003c/span\u003e';
             html += '\u003c/div\u003e';
             html += '\u003cspan style="padding: 6px 12px; background: ' + trendBg + '; color: ' + trendColor + '; border-radius: 20px; font-weight: 600; font-size: 0.9em;"\u003e' + trendText + '\u003c/span\u003e';
-            if (shortOk) {
-              html += '\u003cspan style="padding: 6px 14px; background: linear-gradient(135deg, rgba(255,0,128,0.2), rgba(255,0,128,0.05)); border: 2px solid var(--cyber-pink); border-radius: 20px; font-weight: 700; font-size: 0.95em; color: var(--cyber-pink);"\u003e🎯 可做空\u003c/span\u003e';
+            if (isEth) {
+              if (longOk && shortOk) {
+                html += '\u003cspan style="padding: 6px 14px; background: linear-gradient(135deg, rgba(0,255,159,0.2), rgba(255,0,128,0.2)); border: 2px solid var(--accent); border-radius: 20px; font-weight: 700; font-size: 0.95em; color: var(--text-primary);"\u003e🎯 可双向\u003c/span\u003e';
+              } else if (longOk) {
+                html += '\u003cspan style="padding: 6px 14px; background: linear-gradient(135deg, rgba(0,255,159,0.2), rgba(0,255,159,0.05)); border: 2px solid var(--accent); border-radius: 20px; font-weight: 700; font-size: 0.95em; color: var(--accent);"\u003e🟢 可做多\u003c/span\u003e';
+              } else if (shortOk) {
+                html += '\u003cspan style="padding: 6px 14px; background: linear-gradient(135deg, rgba(255,0,128,0.2), rgba(255,0,128,0.05)); border: 2px solid var(--cyber-pink); border-radius: 20px; font-weight: 700; font-size: 0.95em; color: var(--cyber-pink);"\u003e🔴 可做空\u003c/span\u003e';
+              } else {
+                html += '\u003cspan style="padding: 6px 12px; background: rgba(110,118,129,0.15); color: var(--text-muted); border-radius: 20px; font-weight: 600; font-size: 0.9em;"\u003e⏳ 等待中\u003c/span\u003e';
+              }
             } else {
-              html += '\u003cspan style="padding: 6px 12px; background: rgba(110,118,129,0.15); color: var(--text-muted); border-radius: 20px; font-weight: 600; font-size: 0.9em;"\u003e⏳ 等待中\u003c/span\u003e';
+              if (shortOk) {
+                html += '\u003cspan style="padding: 6px 14px; background: linear-gradient(135deg, rgba(255,0,128,0.2), rgba(255,0,128,0.05)); border: 2px solid var(--cyber-pink); border-radius: 20px; font-weight: 700; font-size: 0.95em; color: var(--cyber-pink);"\u003e🎯 可做空\u003c/span\u003e';
+              } else {
+                html += '\u003cspan style="padding: 6px 12px; background: rgba(110,118,129,0.15); color: var(--text-muted); border-radius: 20px; font-weight: 600; font-size: 0.9em;"\u003e⏳ 等待中\u003c/span\u003e';
+              }
             }
             html += '\u003c/div\u003e';
             
@@ -1566,7 +1585,17 @@ app.get('/', (req, res) => {
             html += '\u003c/div\u003e';
             html += '\u003c/div\u003e';
             
-            html += '\u003cdiv style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin: 12px 0;"\u003e';
+            html += '\u003cdiv style="display: grid; grid-template-columns: repeat(' + (isEth ? 6 : 4) + ', 1fr); gap: 10px; margin: 12px 0;"\u003e';
+            if (isEth) {
+              html += '\u003cdiv style="padding: 10px; background: var(--bg-card); border-radius: 8px; text-align: center;"\u003e';
+              html += '\u003cdiv style="font-size: 0.7em; color: var(--text-muted);"\u003eRSI(4)≤' + rsiBuyFast + '\u003c/div\u003e';
+              html += '\u003cdiv style="font-size: 1em; font-weight: 600; font-family: monospace;"\u003e' + (ind.rsi_fast != null ? ind.rsi_fast.toFixed(1) : '-') + (c.rsi_long ? ' ✓' : ' ✗') + '\u003c/div\u003e';
+              html += '\u003c/div\u003e';
+              html += '\u003cdiv style="padding: 10px; background: var(--bg-card); border-radius: 8px; text-align: center;"\u003e';
+              html += '\u003cdiv style="font-size: 0.7em; color: var(--text-muted);"\u003eRSI(14)≤' + rsiBuyMain + '\u003c/div\u003e';
+              html += '\u003cdiv style="font-size: 1em; font-weight: 600; font-family: monospace;"\u003e' + (ind.rsi_main != null ? ind.rsi_main.toFixed(1) : '-') + (c.rsi_long ? ' ✓' : ' ✗') + '\u003c/div\u003e';
+              html += '\u003c/div\u003e';
+            }
             html += '\u003cdiv style="padding: 10px; background: var(--bg-card); border-radius: 8px; text-align: center;"\u003e';
             html += '\u003cdiv style="font-size: 0.7em; color: var(--text-muted);"\u003eRSI(4)≥' + rsiSell + '\u003c/div\u003e';
             html += '\u003cdiv style="font-size: 1em; font-weight: 600; font-family: monospace;"\u003e' + (ind.rsi_fast != null ? ind.rsi_fast.toFixed(1) : '-') + (c.rsi_short ? ' ✓' : ' ✗') + '\u003c/div\u003e';
@@ -1585,17 +1614,44 @@ app.get('/', (req, res) => {
             html += '\u003c/div\u003e';
             html += '\u003c/div\u003e';
             
-            html += '\u003cdiv style="margin: 12px 0; padding: 10px 12px; background: var(--bg-card); border-radius: 8px; font-size: 0.8em;"\u003e';
-            html += '\u003cdiv style="color: var(--text-muted); margin-bottom: 6px; font-weight: 600;"\u003e做空条件 (short_only)\u003c/div\u003e';
-            html += '\u003cdiv style="display: flex; flex-wrap: wrap; gap: 8px 12px;"\u003e';
-            html += '\u003cspan title="EMA50小于EMA200 且 价格小于EMA200×1.05"\u003eRegime ' + (c.regime_short ? '✓' : '✗') + '\u003c/span\u003e';
-            html += '\u003cspan title="价格≥BB上轨×0.99 或 价格≥EMA20×1.015"\u003ePullback ' + (c.pullback_short ? '✓' : '✗') + '\u003c/span\u003e';
-            html += '\u003cspan title="RSI(4)≥' + rsiSell + ' 且 RSI(14)≥' + rsiMainSell + '"\u003eRSI ' + (c.rsi_short ? '✓' : '✗') + '\u003c/span\u003e';
-            html += '\u003cspan title="成交量≥均量×65%"\u003eVolume ' + (c.volume_ok ? '✓' : '✗') + '\u003c/span\u003e';
-            html += '\u003cspan title="价格≤EMA200×1.10 未突破"\u003eNoBreakout ' + (c.not_breakout ? '✓' : '✗') + '\u003c/span\u003e';
-            html += '\u003cspan title="收盘≤前收 或 RSI(4)下降 确认回落"\u003eStabilizing ' + (c.stabilizing_short ? '✓' : '✗') + '\u003c/span\u003e';
-            html += '\u003c/div\u003e';
-            html += '\u003c/div\u003e';
+            if (isEth) {
+              html += '\u003cdiv style="margin: 12px 0; padding: 10px 12px; background: var(--bg-card); border-radius: 8px; font-size: 0.8em;"\u003e';
+              html += '\u003cdiv style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;"\u003e';
+              html += '\u003cdiv style="padding: 8px; background: rgba(0,255,159,0.05); border-radius: 6px; border: 1px solid rgba(0,255,159,0.2);"\u003e';
+              html += '\u003cdiv style="color: var(--accent); font-weight: 600; margin-bottom: 4px; font-size: 0.85em;"\u003e🟢 做多条件 (both)\u003c/div\u003e';
+              html += '\u003cdiv style="display: flex; flex-wrap: wrap; gap: 4px 8px;"\u003e';
+              html += '\u003cspan title="EMA50>EMA200 且 价格>EMA200×0.95"\u003eRegime ' + (c.regime_long ? '✓' : '✗') + '\u003c/span\u003e';
+              html += '\u003cspan title="价格≤BB下轨×1.01 或 价格≤EMA20×0.985"\u003ePullback ' + (c.pullback_long ? '✓' : '✗') + '\u003c/span\u003e';
+              html += '\u003cspan title="RSI(4)≤' + rsiBuyFast + ' 且 RSI(14)≤' + rsiBuyMain + '"\u003eRSI ' + (c.rsi_long ? '✓' : '✗') + '\u003c/span\u003e';
+              html += '\u003cspan title="成交量≥均量×65%"\u003eVolume ' + (c.volume_ok ? '✓' : '✗') + '\u003c/span\u003e';
+              html += '\u003c/div\u003e';
+              html += '\u003c/div\u003e';
+              html += '\u003cdiv style="padding: 8px; background: rgba(255,0,128,0.05); border-radius: 6px; border: 1px solid rgba(255,0,128,0.2);"\u003e';
+              html += '\u003cdiv style="color: var(--cyber-pink); font-weight: 600; margin-bottom: 4px; font-size: 0.85em;"\u003e🔴 做空条件 (both)\u003c/div\u003e';
+              html += '\u003cdiv style="display: flex; flex-wrap: wrap; gap: 4px 8px;"\u003e';
+              html += '\u003cspan title="EMA50小于EMA200 且 价格小于EMA200×1.05"\u003eRegime ' + (c.regime_short ? '✓' : '✗') + '\u003c/span\u003e';
+              html += '\u003cspan title="价格≥BB上轨×0.99 或 价格≥EMA20×1.015"\u003ePullback ' + (c.pullback_short ? '✓' : '✗') + '\u003c/span\u003e';
+              html += '\u003cspan title="RSI(4)≥' + rsiSell + ' 且 RSI(14)≥' + rsiMainSell + '"\u003eRSI ' + (c.rsi_short ? '✓' : '✗') + '\u003c/span\u003e';
+              html += '\u003cspan title="成交量≥均量×65%"\u003eVolume ' + (c.volume_ok ? '✓' : '✗') + '\u003c/span\u003e';
+              html += '\u003cspan title="价格≤EMA200×1.10 未突破"\u003eNoBreakout ' + (c.not_breakout ? '✓' : '✗') + '\u003c/span\u003e';
+              html += '\u003cspan title="收盘≤前收 或 RSI(4)下降 确认回落"\u003eStabilizing ' + (c.stabilizing_short ? '✓' : '✗') + '\u003c/span\u003e';
+              html += '\u003c/div\u003e';
+              html += '\u003c/div\u003e';
+              html += '\u003c/div\u003e';
+              html += '\u003c/div\u003e';
+            } else {
+              html += '\u003cdiv style="margin: 12px 0; padding: 10px 12px; background: var(--bg-card); border-radius: 8px; font-size: 0.8em;"\u003e';
+              html += '\u003cdiv style="color: var(--text-muted); margin-bottom: 6px; font-weight: 600;"\u003e🔴 做空条件 (short_only)\u003c/div\u003e';
+              html += '\u003cdiv style="display: flex; flex-wrap: wrap; gap: 8px 12px;"\u003e';
+              html += '\u003cspan title="EMA50小于EMA200 且 价格小于EMA200×1.05"\u003eRegime ' + (c.regime_short ? '✓' : '✗') + '\u003c/span\u003e';
+              html += '\u003cspan title="价格≥BB上轨×0.99 或 价格≥EMA20×1.015"\u003ePullback ' + (c.pullback_short ? '✓' : '✗') + '\u003c/span\u003e';
+              html += '\u003cspan title="RSI(4)≥' + rsiSell + ' 且 RSI(14)≥' + rsiMainSell + '"\u003eRSI ' + (c.rsi_short ? '✓' : '✗') + '\u003c/span\u003e';
+              html += '\u003cspan title="成交量≥均量×65%"\u003eVolume ' + (c.volume_ok ? '✓' : '✗') + '\u003c/span\u003e';
+              html += '\u003cspan title="价格≤EMA200×1.10 未突破"\u003eNoBreakout ' + (c.not_breakout ? '✓' : '✗') + '\u003c/span\u003e';
+              html += '\u003cspan title="收盘≤前收 或 RSI(4)下降 确认回落"\u003eStabilizing ' + (c.stabilizing_short ? '✓' : '✗') + '\u003c/span\u003e';
+              html += '\u003c/div\u003e';
+              html += '\u003c/div\u003e';
+            }
             
             html += '\u003cdiv style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--border);"\u003e';
             html += '\u003cdiv style="text-align: center;"\u003e\u003cdiv style="font-size: 0.75em; color: var(--text-muted); margin-bottom: 4px;"\u003e价格 / BB\u003c/div\u003e';
