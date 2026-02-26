@@ -40,7 +40,8 @@ CONFIG = {
     "min_order_value": 10,
     "check_interval": 60,
     "trade_cooldown": 14400,  # 4h，对齐收益最优组合的冷却设置
-    "trade_side": "short_only",  # both / long_only / short_only
+    "trade_side": "both",  # both / long_only / short_only（全局默认）
+    "trade_side_by_symbol": {"BTC": "short_only", "ETH": "both"},  # 按币种覆盖
     "maker_fee": 0.0001,
     "taker_fee": 0.00035,
     "min_profit_after_fee": 0.005,
@@ -395,7 +396,8 @@ class NostalgiaForInfinityTrader:
             return {"action": "HOLD", "reason": f"{symbol} ATR is zero"}
 
         short_enabled = bool(params.get("enable_short", True))
-        trade_side = str(CONFIG.get("trade_side", "both")).lower()
+        by_symbol = CONFIG.get("trade_side_by_symbol") or {}
+        trade_side = str(by_symbol.get(symbol, CONFIG.get("trade_side", "both"))).lower()
         allow_long = trade_side in {"both", "long_only", "long"}
         allow_short = trade_side in {"both", "short_only", "short"}
         regime_ok = (
@@ -666,7 +668,10 @@ class NostalgiaForInfinityTrader:
         logger.info("NostalgiaForInfinity-inspired trader started")
         logger.info("symbols: %s", CONFIG["symbols"])
         logger.info("timeframe: %s", CONFIG["timeframe"])
-        logger.info("trade_side: %s", CONFIG.get("trade_side", "both"))
+        by_symbol = CONFIG.get("trade_side_by_symbol") or {}
+        for symbol in CONFIG["symbols"]:
+            ts = by_symbol.get(symbol, CONFIG.get("trade_side", "both"))
+            logger.info("trade_side %s: %s", symbol, ts)
         for symbol in CONFIG["symbols"]:
             p = self._get_nfi_params(symbol)
             logger.info(
