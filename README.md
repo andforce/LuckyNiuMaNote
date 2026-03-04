@@ -22,7 +22,6 @@ LuckyNiuMaNote/
 ├── public/                     # 静态资源
 ├── build.js                    # 内容构建器（content/ → generated-data.js）
 ├── server.js                   # Express 服务器（页面路由 + 实时 API）
-├── wrangler.toml               # Cloudflare Workers 部署配置
 └── trading-scripts/
     ├── scripts/
     │   ├── auto_trader_nostalgia_for_infinity.py   # 主力自动交易机器人（当前实盘）
@@ -109,8 +108,6 @@ logs/*.log（交易机器人运行状态）
 npm install
 npm run build         # 生成 src/generated-data.js
 node server.js        # 本地服务，访问 http://localhost:3000
-
-npm run deploy        # 发布到 Cloudflare Workers
 ```
 
 ### 交易脚本
@@ -171,7 +168,7 @@ python trading-scripts/scripts/hl_trade.py orders
 |----|------|
 | 前端 | 原生 HTML/CSS/JS（零框架依赖） |
 | 后端 | Node.js + Express 5 |
-| 部署 | Cloudflare Workers（`wrangler deploy`） |
+| 部署 | AWS |
 | 交易脚本 | Python 3.12 + hyperliquid-python-sdk |
 | 进程管理 | PM2 |
 | 钱包 | eth-account（以太坊兼容） |

@@ -1339,7 +1339,7 @@ export default {
       });
     }
     
-    // Let Cloudflare handle static assets (logo, favicon, etc.)
+    // Static assets (logo, favicon, etc.) are handled by static hosting/server
     // Return 404 for unknown routes
     return new Response('Not Found', { status: 404 });
   }

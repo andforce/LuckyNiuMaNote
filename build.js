@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /**
  * Build script: reads content/ directory and generates src/generated-data.js
- * for bundling into the Cloudflare Worker.
+ * for server/runtime consumption.
  */
 
 const fs = require('fs');
