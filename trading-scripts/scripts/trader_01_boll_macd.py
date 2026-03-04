@@ -295,10 +295,27 @@ class BollMacdTrader:
     
     def execute_exit(self, symbol: str, exit_type: str, pnl_pct: float):
         """执行平仓"""
-        if symbol in self.positions:
-            pos = self.positions[symbol]
-            logger.info(f"【平仓】{symbol} {pos['type']} | 原因: {exit_type} | 盈亏: {pnl_pct*100:.2f}%")
-            del self.positions[symbol]
+        if symbol not in self.positions:
+            return
+        
+        pos = self.positions[symbol]
+        
+        # 实盘平仓
+        if self.exchange:
+            try:
+                # 平掉当前仓位
+                is_buy = pos["type"] == "SHORT"  # 空头平仓用买单
+                size = abs(pos.get("size", 0))
+                if size > 0:
+                    result = self.exchange.order(
+                        symbol, is_buy, size, None, {"market": {}}, reduce_only=True
+                    )
+                    logger.info(f"【实盘平仓】{symbol} 结果: {result}")
+            except Exception as e:
+                logger.error(f"平仓失败 {symbol}: {e}")
+        
+        logger.info(f"【平仓】{symbol} {pos['type']} | 原因: {exit_type} | 盈亏: {pnl_pct*100:.2f}%")
+        del self.positions[symbol]
     
     def execute_entry(self, symbol: str, signal: Dict):
         """执行开仓"""
@@ -312,17 +329,48 @@ class BollMacdTrader:
             logger.info(f"{symbol} 空头信号被过滤")
             return
         
+        # 计算仓位大小 (使用账户余额的30%)
+        size = 0
+        if self.exchange:
+            try:
+                account = self.info.user_state(CONFIG["main_wallet"])
+                balance = float(account.get("marginSummary", {}).get("accountValue", 0))
+                position_value = balance * 0.3 * CONFIG["default_leverage"]
+                size = position_value / signal["price"]
+                if size * signal["price"] < CONFIG["min_order_value"]:
+                    logger.warning(f"{symbol} 订单金额太小，跳过")
+                    return
+            except Exception as e:
+                logger.error(f"获取账户信息失败: {e}")
+                return
+        
+        # 实盘开仓
+        if self.exchange and size > 0:
+            try:
+                is_buy = action == "LONG"
+                result = self.exchange.order(
+                    symbol, is_buy, size, None, {"market": {}}
+                )
+                logger.info(f"【实盘开仓】{symbol} {action} 结果: {result}")
+                if result.get("status") != "ok":
+                    logger.error(f"开仓失败: {result}")
+                    return
+            except Exception as e:
+                logger.error(f"开仓失败 {symbol}: {e}")
+                return
+        
         # 记录持仓
         self.positions[symbol] = {
             "type": action,
             "entry": signal["price"],
+            "size": size,
             "atr": signal["atr"],
             "stop_loss": signal["stop_loss"],
             "take_profit": signal["take_profit"],
             "entry_time": time.time()
         }
         
-        logger.info(f"【开仓】{symbol} {action} @ {signal['price']:.2f} | "
+        logger.info(f"【开仓】{symbol} {action} @ {signal['price']:.2f} | 数量: {size:.4f} | "
                    f"止损: {signal['stop_loss']:.2f} | 止盈: {signal['take_profit']:.2f}")
         self.last_trade_time[symbol] = time.time()
     

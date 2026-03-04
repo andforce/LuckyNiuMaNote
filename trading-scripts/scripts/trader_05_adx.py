@@ -269,10 +269,6 @@ class AdxTrader:
     
     def execute_trade(self, symbol: str, signal: Dict):
         """执行交易"""
-        if not self.exchange:
-            logger.warning(f"[模拟] {symbol} {signal['action']}: {signal['reason']}")
-            return
-            
         side_limit = CONFIG["trade_side_by_symbol"].get(symbol, CONFIG["trade_side"])
         
         action = signal["action"]
@@ -282,8 +278,35 @@ class AdxTrader:
         if action == "SHORT" and side_limit == "long_only":
             logger.info(f"{symbol} 空头信号被过滤 (仅做多)")
             return
-            
-        logger.info(f"[下单] {symbol} {action}: {signal['reason']}")
+        
+        # 实盘交易
+        if self.exchange:
+            try:
+                # 计算仓位大小
+                account = self.info.user_state(CONFIG["main_wallet"])
+                balance = float(account.get("marginSummary", {}).get("accountValue", 0))
+                position_value = balance * 0.3 * CONFIG["default_leverage"]
+                size = position_value / signal["price"]
+                
+                if size * signal["price"] < CONFIG["min_order_value"]:
+                    logger.warning(f"{symbol} 订单金额太小，跳过")
+                    return
+                
+                is_buy = action == "LONG"
+                result = self.exchange.order(
+                    symbol, is_buy, size, None, {"market": {}}
+                )
+                logger.info(f"【实盘】{symbol} {action} 结果: {result}")
+                
+                if result.get("status") != "ok":
+                    logger.error(f"下单失败: {result}")
+                    return
+            except Exception as e:
+                logger.error(f"下单失败 {symbol}: {e}")
+                return
+        else:
+            logger.warning(f"【模拟】{symbol} {action}: {signal['reason']}")
+        
         self.last_trade_time[symbol] = time.time()
     
     def run(self):
