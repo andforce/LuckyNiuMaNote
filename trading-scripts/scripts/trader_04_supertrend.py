@@ -23,10 +23,24 @@ WORKSPACE_ROOT = PROJECT_ROOT.parent
 LOG_DIR = WORKSPACE_ROOT / "logs"
 LOG_DIR.mkdir(parents=True, exist_ok=True)
 
+# 读取配置文件
+def load_config():
+    config_path = Path(__file__).resolve().parents[2] / "config" / ".hl_config"
+    cfg = {}
+    if config_path.exists():
+        with open(config_path, 'r') as f:
+            for line in f:
+                if '=' in line and not line.startswith('#'):
+                    key, value = line.strip().split('=', 1)
+                    cfg[key] = value
+    return cfg
+
+hl_cfg = load_config()
+
 CONFIG = {
-    "main_wallet": "",
-    "api_wallet": "",
-    "api_private_key": os.getenv("HL_API_KEY", ""),
+    "main_wallet": hl_cfg.get("MAIN_WALLET", ""),
+    "api_wallet": hl_cfg.get("API_WALLET", ""),
+    "api_private_key": hl_cfg.get("API_PRIVATE_KEY", os.getenv("HL_API_KEY", "")),
     "symbols": ["BTC", "ETH"],
     "timeframe": "1h",
     "max_leverage": 3,
@@ -247,9 +261,9 @@ class SuperTrendTrader:
         if self.exchange:
             try:
                 # 计算仓位大小
-                account = self.info.user_state(CONFIG["main_wallet"])
-                balance = float(account.get("marginSummary", {}).get("accountValue", 0))
-                position_value = balance * 0.3 * CONFIG["default_leverage"]
+                position_value = 30.0  # 固定仓位
+                # 不查询余额，使用固定仓位
+                # position_value = 30.0 已设置
                 size = position_value / signal["price"]
                 
                 if size * signal["price"] < CONFIG["min_order_value"]:
@@ -257,19 +271,37 @@ class SuperTrendTrader:
                     return
                 
                 is_buy = action == "LONG"
+                current_price = signal["price"]
+                limit_price = current_price * 1.01 if is_buy else current_price * 0.99
+                limit_price = round(limit_price, 1)
                 result = self.exchange.order(
-                    symbol, is_buy, size, None, {"market": {}}
+                    symbol, is_buy, size, limit_price, {"limit": {"tif": "Gtc"}}
                 )
                 logger.info(f"【实盘】{symbol} {action} 结果: {result}")
                 
+                # 检查订单是否真正成功（不仅外层status，还要检查内部statuses）
                 if result.get("status") != "ok":
                     logger.error(f"下单失败: {result}")
                     return
+                
+                # 检查内部statuses是否有错误
+                statuses = result.get("response", {}).get("data", {}).get("statuses", [])
+                if statuses and len(statuses) > 0:
+                    if "error" in statuses[0]:
+                        logger.error(f"下单被拒绝: {statuses[0]['error']}")
+                        return
+                    if "resting" not in statuses[0] and "filled" not in statuses[0]:
+                        logger.error(f"下单异常: {statuses[0]}")
+                        return
+                
+                logger.info(f"【成功】{symbol} {action} 订单已提交")
+                
             except Exception as e:
                 logger.error(f"下单失败 {symbol}: {e}")
                 return
         else:
             logger.warning(f"【模拟】{symbol} {action}: {signal['reason']}")
+            return
         
         self.last_trade_time[symbol] = time.time()
     
