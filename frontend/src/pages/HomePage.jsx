@@ -102,7 +102,6 @@ function LiveStats({ staticStats, account }) {
 export default function HomePage({ data }) {
   const [positionData, setPositionData] = useState(null);
   const [tradersData, setTradersData] = useState(null);
-  const [indicatorsData, setIndicatorsData] = useState(null);
   const wallet = data.VERIFICATION;
 
   useEffect(() => {
@@ -110,14 +109,12 @@ export default function HomePage({ data }) {
     const poll = async () => {
       const tasks = [
         fetch('/api/position').then((r) => r.json()).catch(() => null),
-        fetch('/api/traders-status').then((r) => r.json()).catch(() => null),
-        fetch('/api/indicators').then((r) => r.json()).catch(() => null)
+        fetch('/api/traders-status').then((r) => r.json()).catch(() => null)
       ];
-      const [position, traders, indicators] = await Promise.all(tasks);
+      const [position, traders] = await Promise.all(tasks);
       if (!alive) return;
       if (position?.success) setPositionData(position);
       if (traders?.success) setTradersData(traders);
-      if (indicators?.success) setIndicatorsData(indicators);
     };
 
     poll();
@@ -169,21 +166,6 @@ export default function HomePage({ data }) {
           <div className="bots-grid">
             {tradersData.traders.map((bot) => <BotCard key={bot.id} bot={bot} />)}
           </div>
-        </div>
-      )}
-
-      {indicatorsData?.indicators && (
-        <div className="position-card" style={{ marginTop: 20 }}>
-          <div className="position-header">
-            <h3>📈 NFI 技术指标（1小时）</h3>
-            <span className="live-badge">● LIVE</span>
-          </div>
-          {Object.entries(indicatorsData.indicators).map(([symbol, ind]) => (
-            <div className="position-item" key={symbol}>
-              <div className="position-row"><span className="coin">{symbol}</span><span className="value">${ind.price?.toFixed(2)}</span></div>
-              <div className="position-row"><span className="label">EMA20 / EMA50 / EMA200</span><span className="value">{ind.ema_fast?.toFixed(2)} / {ind.ema_trend?.toFixed(2)} / {ind.ema_long?.toFixed(2)}</span></div>
-            </div>
-          ))}
         </div>
       )}
 
