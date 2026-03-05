@@ -84,13 +84,17 @@ function LiveStats({ staticStats, account }) {
 
   const pnlClass = account.totalPnl >= 0 ? 'green' : 'red';
   const pnlSign = account.totalPnl >= 0 ? '+' : '';
+  const urPnl = account.unrealizedPnl || 0;
+  const urClass = urPnl >= 0 ? 'green' : 'red';
+  const urSign = urPnl >= 0 ? '+' : '';
 
   return (
     <div className="stats">
       <div className="stat-card"><div className="stat-label">📅 启动资金</div><div className="stat-value green">${account.initialCapital}</div></div>
       <div className="stat-card"><div className="stat-label">💰 总资产</div><div className="stat-value blue">${account.totalValue.toFixed(2)}</div></div>
       <div className="stat-card"><div className="stat-label">📈 总收益</div><div className={`stat-value ${pnlClass}`}>{pnlSign}{account.totalPnlPct.toFixed(2)}%</div></div>
-      <div className="stat-card"><div className="stat-label">💵 未实现盈亏</div><div className={`stat-value ${pnlClass}`}>{pnlSign}${account.totalPnl.toFixed(2)}</div></div>
+      <div className="stat-card"><div className="stat-label">💰 总盈亏</div><div className={`stat-value ${pnlClass}`}>{pnlSign}${account.totalPnl.toFixed(2)}</div></div>
+      <div className="stat-card"><div className="stat-label">💵 未实现盈亏</div><div className={`stat-value ${urClass}`}>{urSign}${urPnl.toFixed(2)}</div></div>
     </div>
   );
 }
@@ -138,13 +142,16 @@ export default function HomePage({ data }) {
             positionData.positions.map((pos) => (
               <div className="position-item" key={`${pos.coin}-${pos.side}`}>
                 <div className="position-row">
-                  <span className="coin">{pos.coin}</span>
+                  <span className="coin">{pos.coin} {pos.leverage && `${pos.leverage}x`}</span>
                   <span className={`side ${pos.side === 'LONG' ? 'long' : 'short'}`}>{pos.side}</span>
-                  <span className="size">{pos.size}</span>
+                  <span className="size">{pos.size} {pos.coin}</span>
                 </div>
-                <div className="position-row"><span className="label">开仓价</span><span className="value">${pos.entryPx.toLocaleString()}</span></div>
-                <div className="position-row"><span className="label">现价</span><span className="value price-live">${pos.currentPx.toLocaleString()}</span></div>
-                <div className="position-row pnl-row"><span className="label">盈亏</span><span className={`value ${pos.pnl >= 0 ? 'profit' : 'loss'}`}>{pos.pnl >= 0 ? '+' : ''}${pos.pnl.toFixed(2)}</span></div>
+                <div className="position-row"><span className="label">仓位价值</span><span className="value">{pos.positionValue.toFixed(2)} USDC</span></div>
+                <div className="position-row"><span className="label">开仓价格</span><span className="value">${pos.entryPx.toLocaleString()}</span></div>
+                <div className="position-row"><span className="label">标记价格</span><span className="value price-live">${pos.currentPx.toLocaleString()}</span></div>
+                <div className="position-row pnl-row"><span className="label">盈亏(ROE)</span><span className={`value ${pos.pnl >= 0 ? 'profit' : 'loss'}`}>{pos.pnl >= 0 ? '+' : ''}{pos.pnl.toFixed(2)}  ({(pos.roe * 100) >= 0 ? '+' : ''}{(pos.roe * 100).toFixed(1)}%)</span></div>
+                <div className="position-row"><span className="label">保证金</span><span className="value">{pos.marginUsed.toFixed(2)} ({pos.leverageType})</span></div>
+                <div className="position-row"><span className="label">资金费</span><span className="value">{pos.cumFunding >= 0 ? '+' : ''}{pos.cumFunding.toFixed(2)}</span></div>
               </div>
             ))
           ) : (

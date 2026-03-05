@@ -572,19 +572,21 @@ app.get('/api/position', async (req, res) => {
       .map(p => {
         const pos = p.position;
         const size = parseFloat(pos.szi);
-        const entryPx = parseFloat(pos.entryPx);
-        const currentPx = parseFloat(mids[pos.coin] || 0);
-        const pnl = parseFloat(pos.unrealizedPnl);
-        const pnlPct = entryPx > 0 ? ((currentPx - entryPx) / entryPx * 100) : 0;
-        
+        const leverage = pos.leverage || {};
+
         return {
           coin: pos.coin,
-          size: size,
+          size: Math.abs(size),
           side: size > 0 ? 'LONG' : 'SHORT',
-          entryPx: entryPx,
-          currentPx: currentPx,
-          pnl: pnl,
-          pnlPct: size > 0 ? pnlPct : -pnlPct,
+          leverage: leverage.value ? parseInt(leverage.value) : null,
+          leverageType: (leverage.type || 'cross').charAt(0).toUpperCase() + (leverage.type || 'cross').slice(1),
+          positionValue: parseFloat(pos.positionValue || 0),
+          entryPx: parseFloat(pos.entryPx),
+          currentPx: parseFloat(mids[pos.coin] || 0),
+          pnl: parseFloat(pos.unrealizedPnl),
+          roe: parseFloat(pos.returnOnEquity || 0),
+          marginUsed: parseFloat(pos.marginUsed || 0),
+          cumFunding: parseFloat((pos.cumFunding || {}).sinceOpen || 0),
           liquidationPx: pos.liquidationPx ? parseFloat(pos.liquidationPx) : null
         };
       });
@@ -603,8 +605,12 @@ app.get('/api/position', async (req, res) => {
       return sum + b.total * price;
     }, 0);
 
-    // 总资产
-    const totalValue = perpValue + spotValue;
+    // 未实现盈亏（当前持仓浮动盈亏之和）
+    const unrealizedPnl = positions.reduce((sum, p) => sum + p.pnl, 0);
+
+    // 总资产 = 交易平台 USDC "总余额"（spotClearinghouseState）
+    const usdcBalance = spotBalances.find(b => b.coin === 'USDC');
+    const totalValue = usdcBalance ? usdcBalance.total : 0;
     const initialCapital = 98;
     const totalPnl = totalValue - initialCapital;
     const totalPnlPct = (totalPnl / initialCapital) * 100;
@@ -618,7 +624,8 @@ app.get('/api/position', async (req, res) => {
         totalValue: totalValue,
         initialCapital: initialCapital,
         totalPnl: totalPnl,
-        totalPnlPct: totalPnlPct
+        totalPnlPct: totalPnlPct,
+        unrealizedPnl: unrealizedPnl
       },
       positions: positions,
       spotBalances: spotBalances,
