@@ -18,6 +18,7 @@ from eth_account import Account
 from hyperliquid.exchange import Exchange
 from hyperliquid.info import Info
 from hyperliquid.utils import constants
+from trade_state import load_trade_times, save_trade_times
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 WORKSPACE_ROOT = PROJECT_ROOT.parent
@@ -193,7 +194,7 @@ class BbMeanReversionTrader:
     def __init__(self):
         self.info = Info(constants.MAINNET_API_URL, skip_ws=True)
         self.exchange = None
-        self.last_trade_time = {}
+        self.last_trade_time = load_trade_times("bb_mean_reversion")
         self._setup_exchange()
         
     def _setup_exchange(self):
@@ -265,6 +266,7 @@ class BbMeanReversionTrader:
             
         logger.info(f"[下单] {symbol} {action}: {signal['reason']}")
         self.last_trade_time[symbol] = time.time()
+        save_trade_times("bb_mean_reversion", self.last_trade_time)
     
     def run(self):
         """主循环"""
@@ -292,6 +294,10 @@ class BbMeanReversionTrader:
                         signal["reason"] += " (cooldown)"
                     
                     if signal["action"] != "HOLD":
+                        pos = self.get_position(symbol)
+                        if pos["size"] != 0:
+                            logger.info(f"{symbol} 已有持仓(size={pos['size']}), 跳过开仓")
+                            continue
                         self.execute_trade(symbol, signal)
                     else:
                         logger.info(f"{symbol} {signal['action']}: {signal['reason']}")

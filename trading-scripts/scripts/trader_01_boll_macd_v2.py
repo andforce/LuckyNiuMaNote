@@ -21,6 +21,7 @@ from eth_account import Account
 from hyperliquid.exchange import Exchange
 from hyperliquid.info import Info
 from hyperliquid.utils import constants
+from trade_state import load_trade_times, save_trade_times
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 WORKSPACE_ROOT = PROJECT_ROOT.parent
@@ -325,8 +326,8 @@ class BollMacdTraderV2:
     def __init__(self):
         self.info = Info(constants.MAINNET_API_URL, skip_ws=True)
         self.exchange = None
-        self.last_trade_time = {}
-        self.positions = {}  # 跟踪持仓
+        self.last_trade_time = load_trade_times("boll_macd_v2")
+        self.positions = {}
         self._setup_exchange()
         
     def _setup_exchange(self):
@@ -415,6 +416,7 @@ class BollMacdTraderV2:
                     "time": time.time()
                 }
                 self.last_trade_time[symbol] = time.time()
+                save_trade_times("boll_macd_v2", self.last_trade_time)
             return
             
         side_limit = CONFIG["trade_side_by_symbol"].get(symbol, CONFIG["trade_side"])
@@ -439,6 +441,7 @@ class BollMacdTraderV2:
                 "time": time.time()
             }
             self.last_trade_time[symbol] = time.time()
+            save_trade_times("boll_macd_v2", self.last_trade_time)
     
     def run(self):
         """主循环"""
@@ -458,11 +461,17 @@ class BollMacdTraderV2:
                     
                     current_price = klines["close"][-1]
                     
-                    # 检查是否需要平仓
+                    # 检查是否需要平仓（内存中的持仓）
                     if self.check_exit_conditions(symbol, current_price, {}):
                         logger.info(f"{symbol} 执行平仓")
                         if symbol in self.positions:
                             del self.positions[symbol]
+                        continue
+                    
+                    # 检查链上持仓
+                    pos = self.get_position(symbol)
+                    if pos["size"] != 0:
+                        logger.info(f"{symbol} 已有持仓(size={pos['size']}), 跳过开仓")
                         continue
                     
                     # 分析信号

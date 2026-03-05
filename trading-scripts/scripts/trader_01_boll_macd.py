@@ -21,6 +21,7 @@ from eth_account import Account
 from hyperliquid.exchange import Exchange
 from hyperliquid.info import Info
 from hyperliquid.utils import constants
+from trade_state import load_trade_times, save_trade_times
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 WORKSPACE_ROOT = PROJECT_ROOT.parent
@@ -234,7 +235,7 @@ class BollMacdTrader:
     def __init__(self):
         self.info = Info(constants.MAINNET_API_URL, skip_ws=True)
         self.exchange = None
-        self.last_trade_time = {}
+        self.last_trade_time = load_trade_times("boll_macd")
         self.positions = {}
         self._setup_exchange()
         
@@ -242,7 +243,23 @@ class BollMacdTrader:
         if CONFIG["api_private_key"]:
             account = Account.from_key(CONFIG["api_private_key"])
             self.exchange = Exchange(account, constants.MAINNET_API_URL, account_address=CONFIG["main_wallet"])
-            
+
+    def get_position(self, symbol: str) -> Dict:
+        """获取当前持仓"""
+        try:
+            state = self.info.user_state(CONFIG["main_wallet"])
+            for pos in state.get("assetPositions", []):
+                if pos["position"]["coin"] == symbol:
+                    return {
+                        "size": float(pos["position"]["szi"]),
+                        "entry_price": float(pos["position"]["entryPx"]),
+                        "unrealized_pnl": float(pos["position"]["unrealizedPnl"]),
+                    }
+            return {"size": 0, "entry_price": 0, "unrealized_pnl": 0}
+        except Exception as e:
+            logger.error(f"获取持仓失败 {symbol}: {e}")
+            return {"size": 0, "entry_price": 0, "unrealized_pnl": 0}
+
     def get_klines(self, symbol: str, timeframe: str = "1h", limit: int = 100) -> Dict:
         try:
             end_time = int(datetime.now().timestamp() * 1000)
@@ -411,7 +428,7 @@ class BollMacdTrader:
         logger.info(f"【开仓】{symbol} {action} @ {signal['price']:.2f} | 数量: {size:.4f} | "
                    f"止损: {signal['stop_loss']:.2f} | 止盈: {signal['take_profit']:.2f}")
         self.last_trade_time[symbol] = time.time()
-        self.last_trade_time[symbol] = time.time()
+        save_trade_times("boll_macd", self.last_trade_time)
     
     def run(self):
         logger.info("=" * 50)
@@ -437,10 +454,15 @@ class BollMacdTrader:
                             self.execute_exit(symbol, exit_type, pnl_pct)
                             continue
                     
-                    # 2. 检查是否有持仓
+                    # 2. 检查是否有持仓（内存 + 链上）
                     if symbol in self.positions:
                         logger.info(f"{symbol} 持仓中: {self.positions[symbol]['type']} | "
                                    f"当前价: {current_price:.2f} | 跟踪止损: {self.positions[symbol]['stop_loss']:.2f}")
+                        continue
+                    
+                    pos = self.get_position(symbol)
+                    if pos["size"] != 0:
+                        logger.info(f"{symbol} 链上已有持仓(size={pos['size']}), 跳过开仓")
                         continue
                     
                     # 3. 检查冷却
