@@ -1,127 +1,107 @@
 #!/bin/bash
-set -euo pipefail
+# =============================================================================
+# 赛博牛马交易网站 - 一键部署脚本
+# 功能: 重新编译网站 + 部署 + 重启机器人
+# =============================================================================
 
-DEPLOY_DIR="/home/ubuntu/LuckyNiuMaNote"
-TRADING_DIR="$DEPLOY_DIR/trading-scripts"
-VENV_DIR="$TRADING_DIR/.venv"
-LOG_DIR="$DEPLOY_DIR/logs"
-BACKEND_PM2_NAME="lucky-backend"
+set -e  # 遇到错误立即退出
 
-# ── 颜色输出 ──────────────────────────────────────────────────────────────────
-RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; NC='\033[0m'
-info()  { echo -e "${GREEN}[✓]${NC} $*"; }
-warn()  { echo -e "${YELLOW}[!]${NC} $*"; }
-error() { echo -e "${RED}[✗]${NC} $*"; exit 1; }
+echo "=========================================="
+echo "🚀 赛博牛马一键部署启动"
+echo "=========================================="
+echo ""
 
-# ── 前置检查 ──────────────────────────────────────────────────────────────────
-check_deps() {
-  command -v node  >/dev/null 2>&1 || error "未找到 node，请先安装 Node.js"
-  command -v npm   >/dev/null 2>&1 || error "未找到 npm"
-  command -v pm2   >/dev/null 2>&1 || error "未找到 pm2，请先执行: npm install -g pm2"
-  command -v python3 >/dev/null 2>&1 || error "未找到 python3"
-  [[ -d "$DEPLOY_DIR" ]] || error "部署目录不存在: $DEPLOY_DIR"
-  info "前置检查通过"
-}
+# 颜色定义
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+NC='\033[0m' # No Color
 
-# ── Python 虚拟环境 & 依赖 ────────────────────────────────────────────────────
-setup_python() {
-  if [[ ! -d "$VENV_DIR" ]]; then
-    warn "虚拟环境不存在，正在创建..."
-    python3 -m venv "$VENV_DIR"
-  fi
-  # shellcheck source=/dev/null
-  source "$VENV_DIR/bin/activate"
-  pip install -q --upgrade pip
-  pip install -q -r "$TRADING_DIR/requirements.txt"
-  deactivate
-  info "Python 虚拟环境就绪"
-}
+# 项目路径
+PROJECT_DIR="/home/ubuntu/LuckyNiuMaNote"
+FRONTEND_DIR="$PROJECT_DIR/frontend"
+TRADING_DIR="$PROJECT_DIR/trading-scripts"
 
-# ── Node.js 依赖 ──────────────────────────────────────────────────────────────
-install_node_deps() {
-  cd "$DEPLOY_DIR"
-  npm install --omit=dev --silent
-  info "Node.js 依赖安装完成"
-}
+# 1. 进入项目目录
+echo "📁 进入项目目录..."
+cd "$PROJECT_DIR"
 
-# ── 构建前端 ──────────────────────────────────────────────────────────────────
-build_frontend() {
-  cd "$DEPLOY_DIR"
-  npm --prefix frontend install --silent
-  npm run build
-  info "前端构建完成"
-}
+# 2. 重新编译网站
+echo ""
+echo "🔨 步骤 1/4: 重新编译网站..."
+cd "$FRONTEND_DIR"
 
-# ── 创建日志目录 ──────────────────────────────────────────────────────────────
-ensure_logs_dir() {
-  mkdir -p "$LOG_DIR"
-  info "日志目录就绪: $LOG_DIR"
-}
+if [ ! -d "node_modules" ]; then
+    echo -e "${YELLOW}⚠️  node_modules 不存在，正在安装依赖...${NC}"
+    npm install
+fi
 
-# ── 启动后端 ──────────────────────────────────────────────────────────────────
-start_backend() {
-  cd "$DEPLOY_DIR"
-  if pm2 describe "$BACKEND_PM2_NAME" >/dev/null 2>&1; then
-    pm2 restart "$BACKEND_PM2_NAME"
-    info "后端已重启 (pm2: $BACKEND_PM2_NAME)"
-  else
-    pm2 start server.js \
-      --name "$BACKEND_PM2_NAME" \
-      --log "$LOG_DIR/backend.log" \
-      --error "$LOG_DIR/backend_error.log" \
-      --time \
-      --restart-delay=3000
-    info "后端已启动 (pm2: $BACKEND_PM2_NAME)"
-  fi
-}
+echo "📝 执行 npm run build..."
+npm run build 2>&1 | tail -10
 
-# ── 启动交易机器人 ─────────────────────────────────────────────────────────────
-start_traders() {
-  cd "$TRADING_DIR"
+if [ $? -eq 0 ]; then
+    echo -e "${GREEN}✅ 网站编译成功${NC}"
+else
+    echo -e "${RED}❌ 网站编译失败${NC}"
+    exit 1
+fi
 
-  # run_trader_XX.sh 必须有可执行权限
-  chmod +x run_trader_*.sh run_auto_trader.sh start_trader.sh 2>/dev/null || true
+# 3. 重启网站后端
+echo ""
+echo "🌐 步骤 2/4: 重启网站后端..."
+pm2 restart lucky-backend
 
-  # 用 ecosystem.config.json 管理 6 个机器人
-  if pm2 describe trader-boll-macd >/dev/null 2>&1; then
-    pm2 restart ecosystem.config.json
-    info "交易机器人已重启"
-  else
-    pm2 start ecosystem.config.json
-    info "交易机器人已启动"
-  fi
-}
+if [ $? -eq 0 ]; then
+    echo -e "${GREEN}✅ 网站后端已重启${NC}"
+else
+    echo -e "${YELLOW}⚠️  尝试启动新实例...${NC}"
+    cd "$PROJECT_DIR"
+    pm2 start server.js --name lucky-backend
+fi
 
-# ── 保存 pm2 进程列表（开机自启） ─────────────────────────────────────────────
-save_pm2() {
-  pm2 save
-  info "pm2 进程列表已保存"
-  warn "如需开机自启，请执行: pm2 startup 并按提示运行输出的命令"
-}
+# 等待服务启动
+sleep 2
 
-# ── 状态汇总 ──────────────────────────────────────────────────────────────────
-show_status() {
-  echo ""
-  pm2 list
-  echo ""
-  info "部署完成！后端默认监听端口请查看 server.js 中的 PORT 配置"
-}
+# 4. 重启交易机器人
+echo ""
+echo "🤖 步骤 3/4: 重启交易机器人..."
 
-# ── 主流程 ────────────────────────────────────────────────────────────────────
-main() {
-  echo "========================================="
-  echo "  LuckyNiuMaNote 部署脚本"
-  echo "========================================="
+# 重启 NFI 原版
+echo "  ↳ 重启 NFI原版..."
+pm2 restart auto-trader 2>/dev/null || pm2 start "$TRADING_DIR/run_auto_trader.sh" --name auto-trader
 
-  check_deps
-  setup_python
-  install_node_deps
-  build_frontend
-  ensure_logs_dir
-  start_backend
-  start_traders
-  save_pm2
-  show_status
-}
+# 重启 BOLL+MACD
+echo "  ↳ 重启 BOLL+MACD V3..."
+pm2 restart trader-boll-macd 2>/dev/null || pm2 start "$TRADING_DIR/run_trader_01.sh" --name trader-boll-macd
 
-main "$@"
+# 重启 SuperTrend
+echo "  ↳ 重启 SuperTrend×4.0..."
+pm2 restart trader-supertrend 2>/dev/null || pm2 start "$TRADING_DIR/run_trader_04.sh" --name trader-supertrend
+
+# 重启 ADX
+echo "  ↳ 重启 ADX趋势过滤..."
+pm2 restart trader-adx 2>/dev/null || pm2 start "$TRADING_DIR/run_trader_05.sh" --name trader-adx
+
+echo -e "${GREEN}✅ 所有机器人已重启${NC}"
+
+# 5. 检查实时数据服务
+echo ""
+echo "📊 步骤 4/4: 检查实时数据服务..."
+pm2 list | grep -q "realtime-data" || pm2 start "$TRADING_DIR/realtime_data_cron.sh" --name realtime-data
+
+# 6. 显示状态
+echo ""
+echo "=========================================="
+echo "📋 部署完成 - 服务状态"
+echo "=========================================="
+pm2 list | grep -E "name|lucky|trader|auto|realtime"
+
+echo ""
+echo "=========================================="
+echo "🌐 访问地址"
+echo "=========================================="
+echo "网站: http://15.152.86.199:3000/"
+echo "API:  http://15.152.86.199:3000/api/position"
+echo ""
+echo -e "${GREEN}✅ 一键部署完成！${NC}"
+echo ""
