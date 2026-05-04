@@ -1,7 +1,7 @@
 #!/bin/bash
 # 量化交易机器人管理脚本
 
-cd /home/ubuntu/LuckyNiuMaNote/trading-scripts
+cd /home/yoyo/LuckyNiuMaNote/trading-scripts
 
 case "$1" in
   start)
