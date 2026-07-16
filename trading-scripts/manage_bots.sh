@@ -1,7 +1,7 @@
 #!/bin/bash
 # 量化交易机器人管理脚本
 
-cd /home/yoyo/LuckyNiuMaNote/trading-scripts
+cd -- "$(dirname -- "${BASH_SOURCE[0]}")" || exit 1
 
 case "$1" in
   start)

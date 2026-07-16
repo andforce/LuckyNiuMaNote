@@ -1,4 +1,4 @@
 #!/bin/bash
-cd /home/yoyo/LuckyNiuMaNote/trading-scripts
+cd -- "$(dirname -- "${BASH_SOURCE[0]}")" || exit 1
 source .venv/bin/activate
 exec python scripts/trader_02_rsi_macd.py

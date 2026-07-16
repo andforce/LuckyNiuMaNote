@@ -4,15 +4,15 @@ After=network.target
 
 [Service]
 Type=simple
-User=ubuntu
-Group=ubuntu
-WorkingDirectory=/home/ubuntu/LuckyNiuMaNote
+User=root
+Group=root
+WorkingDirectory=/root/LuckyNiuMaNote
 Environment=NODE_ENV=production
 Environment=LISTEN_HOST=127.0.0.1
 Environment=TRUST_PROXY=1
 Environment=PORT=3000
 Environment=SITE_PUBLIC_URL=https://luckyniuma.com
-ExecStart=/usr/bin/node /home/ubuntu/LuckyNiuMaNote/server.js
+ExecStart=/usr/bin/node /root/LuckyNiuMaNote/server.js
 Restart=always
 RestartSec=3
 

@@ -1,7 +1,7 @@
 #!/bin/bash
 # 启动自动交易机器人
 
-cd /home/yoyo/.openclaw/workspace/LuckyNiuMaNote/trading-scripts
+cd -- "$(dirname -- "${BASH_SOURCE[0]}")" || exit 1
 source .venv/bin/activate
 
 # 确保日志目录存在
